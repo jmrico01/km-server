@@ -1,6 +1,8 @@
 mkdir -p ./build
 
-CPPFLAGS="-std=c++11 -fno-rtti -fno-exceptions -Werror -Wall"
+APP_NAME="km_server"
+
+CPPFLAGS="-m64 -std=c++11 -fno-rtti -fno-exceptions -Werror -Wall"
 
 if [ "$1" = "debug" ]; then
     CPPFLAGS+=" -ggdb3"
@@ -13,5 +15,5 @@ fi
 
 gcc $CPPFLAGS \
     ./src/main.cpp \
-    -o ./build/server \
+    -o ./build/$APP_NAME \
     -fvisibility=hidden
