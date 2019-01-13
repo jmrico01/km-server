@@ -20,7 +20,7 @@
 
 #define LISTEN_BACKLOG_SIZE 5
 
-#define CONNECTION_BUFFER_SIZE MEGABYTES(1)
+#define BUFFER_LENGTH MEGABYTES(1)
 
 #define HTTP_STATUS_LINE_MAX_LENGTH 1024
 
@@ -28,7 +28,7 @@
 
 struct ServerMemory
 {
-	char buffer[CONNECTION_BUFFER_SIZE];
+	char buffer[BUFFER_LENGTH];
 	// TODO maybe add a JSON memory block here and use custom allocator
 };
 
@@ -87,6 +87,79 @@ bool StringCompare(const char* str1, const char* str2, int n)
 	return true;
 }
 
+bool ParseRequest(int clientSocketFD, char* buffer, int bufferLength,
+	HTTPRequestMethod& outMethod,
+	const char** outURI, int& outURILength,
+	HTTPVersion& outVersion)
+{
+	// Read and parse request according to HTTP/1.1 standard
+	// Source: https://www.w3.org/Protocols/rfc2616/rfc2616-sec5.html
+
+	int n = read(clientSocketFD, buffer, bufferLength);
+	if (n < 0) {
+		fprintf(stderr, "Failed to read from client socket\n");
+		return false;
+	}
+
+	if (n == 0) {
+		return false;
+	}
+
+	const char* methodString = buffer;
+	int firstSpace = 0;
+	while (firstSpace < n && buffer[firstSpace] != ' ') {
+		firstSpace++;
+	}
+
+	outMethod = HTTP_REQUEST_NONE;
+	if (StringCompare(methodString, "GET", 3)) {
+		outMethod = HTTP_REQUEST_GET;
+	}
+	else if (StringCompare(methodString, "POST", 4)) {
+		outMethod = HTTP_REQUEST_POST;
+	}
+	else {
+		fprintf(stderr, "Unrecognized HTTP request method. Full request:\n");
+		fprintf(stderr, "%.*s\n", n, buffer);
+		return false;
+	}
+
+	if (firstSpace + 1 >= n) {
+		fprintf(stderr, "Incomplete HTTP request\n");
+		return false;
+	}
+	*outURI = &buffer[firstSpace + 1];
+	int secondSpace = firstSpace + 1;
+	while (secondSpace < n && buffer[secondSpace] != ' ') {
+		secondSpace++;
+	}
+	outURILength = secondSpace - firstSpace - 1;
+
+	if (secondSpace + 1 >= n) {
+		fprintf(stderr, "Incomplete HTTP request\n");
+		return false;
+	}
+	const char* versionString = &buffer[secondSpace + 1];
+	int lineEnd = secondSpace + 1;
+	while (lineEnd < n && buffer[lineEnd] != '\r') {
+		lineEnd++;
+	}
+
+	outVersion = HTTP_VERSION_NONE;
+	if (StringCompare(versionString, "HTTP/1.1", 8)) {
+		outVersion = HTTP_VERSION_1_1;
+	}
+	else {
+		fprintf(stderr, "Unrecognized HTTP version. Full request:\n");
+		fprintf(stderr, "%.*s\n", n, buffer);
+		return false;
+	}
+
+	// TODO read HTTP headers
+
+	return true;
+}
+
 void WriteStatus(int clientSocketFD, int statusCode, const char* statusMsg)
 {
 	char statusLine[HTTP_STATUS_LINE_MAX_LENGTH];
@@ -99,7 +172,7 @@ void WriteStatus(int clientSocketFD, int statusCode, const char* statusMsg)
 }
 
 void HandleGetRequest(const char* uri, int uriLength,
-	char* buffer, int bufferMaxSize, int clientSocketFD)
+	char* buffer, int bufferLength, int clientSocketFD)
 {
 	char path[URI_PATH_MAX_LENGTH];
 	int pathLength = snprintf(path, URI_PATH_MAX_LENGTH, "public%.*s", uriLength, uri);
@@ -137,7 +210,7 @@ void HandleGetRequest(const char* uri, int uriLength,
 
 	int n;
 	while (true) {
-		n = read(fileFD, buffer, bufferMaxSize);
+		n = read(fileFD, buffer, bufferLength);
 		if (n < 0) {
 			// TODO Uh oh... we already sent status 200
 			fprintf(stderr, "Failed to read file %s\n", path);
@@ -160,7 +233,7 @@ void HandleGetRequest(const char* uri, int uriLength,
 
 int main(int argc, char* argv[])
 {
-	if (CONNECTION_BUFFER_SIZE > SSIZE_MAX) {
+	if (BUFFER_LENGTH > SSIZE_MAX) {
         fprintf(stderr, "Buffer size too large for read(...)\n");
         return 1;
 	}
@@ -173,7 +246,8 @@ int main(int argc, char* argv[])
 
 	sigaction(SIGINT, &sigIntHandler, NULL);
 
-	void* allocatedMemory = mmap(NULL, sizeof(ServerMemory),
+	int allocatedMemorySize = sizeof(ServerMemory);
+	void* allocatedMemory = mmap(NULL, allocatedMemorySize,
 		PROT_READ | PROT_WRITE,
 		MAP_PRIVATE | MAP_ANONYMOUS,
 		-1, 0);
@@ -186,7 +260,7 @@ int main(int argc, char* argv[])
     int socketFD = socket(AF_INET, SOCK_STREAM, 0);
     if (socketFD < 0) {
         fprintf(stderr, "Failed to open socket\n");
-		munmap(memory, CONNECTION_BUFFER_SIZE);
+		munmap(allocatedMemory, allocatedMemorySize);
         return 1;
     }
 
@@ -198,14 +272,14 @@ int main(int argc, char* argv[])
     if (bind(socketFD, (sockaddr*)&serverAddr, sizeof(serverAddr)) < 0) {
         fprintf(stderr, "Failed to bind server addr with port %d to socket\n", PORT_HTTP);
 		close(socketFD);
-		munmap(memory, CONNECTION_BUFFER_SIZE);
+		munmap(allocatedMemory, allocatedMemorySize);
         return 1;
     }
 
     if (listen(socketFD, LISTEN_BACKLOG_SIZE) < 0) {
         fprintf(stderr, "Failed to listen to socket on port %d\n", PORT_HTTP);
 		close(socketFD);
-		munmap(memory, CONNECTION_BUFFER_SIZE);
+		munmap(allocatedMemory, allocatedMemorySize);
         return 1;
     }
 
@@ -226,75 +300,16 @@ int main(int argc, char* argv[])
 		PrintSeparator();
 		printf("Received client connection\n");
 
-		n = read(clientSocketFD, buffer, CONNECTION_BUFFER_SIZE);
-		if (n < 0) {
-			fprintf(stderr, "Failed to read from client socket\n");
+		HTTPRequestMethod method;
+		const char* uri;
+		int uriLength;
+		HTTPVersion version;
+		bool parseResult = ParseRequest(clientSocketFD, buffer, BUFFER_LENGTH,
+			method, &uri, uriLength, version);
+		if (!parseResult) {
 			close(clientSocketFD);
 			continue;
 		}
-
-		if (n == 0) {
-			close(clientSocketFD);
-			continue;
-		}
-
-		// Parse request according to HTTP/1.1 standard
-		// Source: https://www.w3.org/Protocols/rfc2616/rfc2616-sec5.html
-		const char* methodString = buffer;
-		int firstSpace = 0;
-		while (firstSpace < n && buffer[firstSpace] != ' ') {
-			firstSpace++;
-		}
-
-		HTTPRequestMethod method = HTTP_REQUEST_NONE;
-		if (StringCompare(methodString, "GET", 3)) {
-			method = HTTP_REQUEST_GET;
-		}
-		else if (StringCompare(methodString, "POST", 4)) {
-			method = HTTP_REQUEST_POST;
-		}
-		else {
-			fprintf(stderr, "Unrecognized HTTP request method. Full request:\n");
-			fprintf(stderr, "%.*s\n", n, buffer);
-			close(clientSocketFD);
-			continue;
-		}
-
-		if (firstSpace + 1 >= n) {
-			fprintf(stderr, "Incomplete HTTP request\n");
-			close(clientSocketFD);
-			continue;
-		}
-		const char* uri = &buffer[firstSpace + 1];
-		int secondSpace = firstSpace + 1;
-		while (secondSpace < n && buffer[secondSpace] != ' ') {
-			secondSpace++;
-		}
-		int uriLength = secondSpace - firstSpace - 1;
-
-		if (secondSpace + 1 >= n) {
-			fprintf(stderr, "Incomplete HTTP request\n");
-			close(clientSocketFD);
-			continue;
-		}
-		const char* versionString = &buffer[secondSpace + 1];
-		int lineEnd = secondSpace + 1;
-		while (lineEnd < n && buffer[lineEnd] != '\r') {
-			lineEnd++;
-		}
-
-		HTTPVersion version = HTTP_VERSION_NONE;
-		if (StringCompare(versionString, "HTTP/1.1", 8)) {
-			version = HTTP_VERSION_1_1;
-		}
-		else {
-			fprintf(stderr, "Unrecognized HTTP version. Full request:\n");
-			fprintf(stderr, "%.*s\n", n, buffer);
-			close(clientSocketFD);
-			continue;
-		}
-
-		// TODO read HTTP headers
 
 		printf("HTTP version %d request, method %d, URI: %.*s\n",
 			version, method, uriLength, uri);
@@ -302,14 +317,14 @@ int main(int argc, char* argv[])
 		switch (method) {
 			case HTTP_REQUEST_GET: {
 				HandleGetRequest(uri, uriLength,
-					buffer, CONNECTION_BUFFER_SIZE, clientSocketFD);
+					buffer, BUFFER_LENGTH, clientSocketFD);
 			} break;
 			case HTTP_REQUEST_POST: {
 				printf("Implement this! (POST)\n");
 				printf("%.*s\n", n, buffer);
 
 				const cJSON* json = cJSON_Parse("[1, 2, 3, 4, 5, 6]");
-				printf("%d", cJSON_IsArray(json));
+				cJSON_IsArray(json);
 			}
 			default: {
 				fprintf(stderr, "Unhandled HTTP request method\n");
@@ -321,7 +336,7 @@ int main(int argc, char* argv[])
 	}
 
 	close(socketFD);
-	munmap(memory, CONNECTION_BUFFER_SIZE);
+	munmap(allocatedMemory, allocatedMemorySize);
 	printf("Stopped server on port %d\n", PORT_HTTP);
 
     return 0;
