@@ -1,0 +1,47 @@
+/**
+ * @license
+ * MyFonts Webfont Build ID 3234096, 2016-06-16T14:41:31-0400
+ * 
+ * The fonts listed in this notice are subject to the End User License
+ * Agreement(s) entered into by the website owner. All other parties are 
+ * explicitly restricted from using the Licensed Webfonts(s).
+ * 
+ * You may obtain a valid license at the URLs below.
+ * 
+ * Webfont: GalanoGrotesque-Light by Rene Bieder
+ * URL: http://www.myfonts.com/fonts/rene-bieder/galano-grotesque/light/
+ * 
+ * Webfont: GalanoGrotesque-Medium by Rene Bieder
+ * URL: http://www.myfonts.com/fonts/rene-bieder/galano-grotesque/medium/
+ * 
+ * Webfont: GalanoGrotesqueAlt-Bold by Rene Bieder
+ * URL: http://www.myfonts.com/fonts/rene-bieder/galano-grotesque/alt-bold/
+ * 
+ * Webfont: GalanoGrotesqueAlt-SemiBold by Rene Bieder
+ * URL: http://www.myfonts.com/fonts/rene-bieder/galano-grotesque/alt-semi-bold/
+ * 
+ * 
+ * License: http://www.myfonts.com/viewlicense?type=web&buildid=3234096
+ * Licensed pageviews: 10,000
+ * Webfonts copyright: Copyright &#x00A9; 2014 by Ren&#x00E9; Bieder. All rights reserved.
+ * 
+ * © 2016 MyFonts Inc
+*/
+
+
+/* @import must be at top of file, otherwise CSS will not work */
+/* TODO was this important? */
+/* @import url("//hello.myfonts.net/count/315930"); */
+
+  
+@font-face {font-family: 'GalanoGrotesque-Light';src: url('webfonts/315930_0_0.eot');src: url('webfonts/315930_0_0.eot?#iefix') format('embedded-opentype'),url('webfonts/315930_0_0.woff2') format('woff2'),url('webfonts/315930_0_0.woff') format('woff'),url('webfonts/315930_0_0.ttf') format('truetype');}
+ 
+  
+@font-face {font-family: 'GalanoGrotesque-Medium';src: url('webfonts/315930_1_0.eot');src: url('webfonts/315930_1_0.eot?#iefix') format('embedded-opentype'),url('webfonts/315930_1_0.woff2') format('woff2'),url('webfonts/315930_1_0.woff') format('woff'),url('webfonts/315930_1_0.ttf') format('truetype');}
+ 
+  
+@font-face {font-family: 'GalanoGrotesqueAlt-Bold';src: url('webfonts/315930_2_0.eot');src: url('webfonts/315930_2_0.eot?#iefix') format('embedded-opentype'),url('webfonts/315930_2_0.woff2') format('woff2'),url('webfonts/315930_2_0.woff') format('woff'),url('webfonts/315930_2_0.ttf') format('truetype');}
+ 
+  
+@font-face {font-family: 'GalanoGrotesqueAlt-SemiBold';src: url('webfonts/315930_3_0.eot');src: url('webfonts/315930_3_0.eot?#iefix') format('embedded-opentype'),url('webfonts/315930_3_0.woff2') format('woff2'),url('webfonts/315930_3_0.woff') format('woff'),url('webfonts/315930_3_0.ttf') format('truetype');}
+ 

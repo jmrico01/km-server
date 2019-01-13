@@ -1,0 +1,71 @@
+@charset "utf-8";
+/* CSS Document */
+
+/* Remove page margins */
+html, body {
+	margin:0;
+	padding:0;
+}
+
+/* Default font settings */
+* {
+	font-family:GalanoGrotesque-Light, sans-serif;
+	color:#333333;
+}
+p {
+	font-size:14px;
+	line-height:150%;
+	letter-spacing:-0.15px;
+}
+b {
+	font-family:GalanoGrotesque-Medium, sans-serif;
+	letter-spacing:0.15px;
+}
+strong {
+	font-family:GalanoGrotesque-Medium, sans-serif;
+	letter-spacing:0.15px;
+}
+h1 {
+	font-family:GalanoGrotesqueAlt-Bold, sans-serif;
+	font-size:40px;
+}
+/* Post titles */
+h2 {
+	font-family:GalanoGrotesqueAlt-SemiBold, sans-serif;
+	font-size:32px;
+	letter-spacing:-1px;
+	margin-top:0;
+	margin-bottom:0;
+}
+/* Date stamp */
+h3 {
+	font-family:GalanoGrotesque-Medium, sans-serif;
+	font-size:12px;
+	margin:0;
+	margin-left:15%;
+	margin-top:72px;
+	margin-bottom:12px;
+	text-decoration:none;
+}
+
+/* General link formatting */
+a {
+	font-family:GalanoGrotesque-Medium, sans-serif;
+    text-decoration:none;
+}
+a:hover, a:active {
+	color:#fb3f32;
+}
+.mainLink {
+	font-family:GalanoGrotesqueAlt-SemiBold, sans-serif;
+	font-size:100%;
+	text-decoration:none;
+}
+.mainLink:hover, .mainLink:active {
+	color:#fb3f32;
+}
+
+/* Hide post loader */
+#postLoader {
+    display: none;
+}

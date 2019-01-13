@@ -1,0 +1,41 @@
+@charset "utf-8";
+/* CSS Document */
+
+#sidebar {
+	display:none;
+}
+#titleBar {
+	/* temp */
+	visibility:hidden;
+	width:100%;
+}
+#logoCont {
+	width:100px;
+	margin:0 auto;
+}
+.logo {
+	width:100px;
+}
+
+/* Main scrollable content */
+#content {
+	height:100%;
+}
+.post {
+	width:100%;
+}
+
+/* Single post and its components */
+.entry {
+	width:85%;
+	min-width:220px;
+	min-height:300px;
+	margin:0 auto;
+}
+.entryOutline {
+	width:70%;
+	min-width:220px;
+	min-height:300px;
+	margin:0 auto;
+	background-color:#ECECEC;
+}

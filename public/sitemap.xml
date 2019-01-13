@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
+
+<url>
+  <loc>http://www.kapricornmedia.com/</loc>
+  <image:image>
+    <image:loc>http://www.kapricornmedia.com/images/logo/logoBlack.png</image:loc>
+    <image:title>Kapricorn Media Logo</image:title>
+    <image:caption>Logo for the independent game development team, Kapricorn Media.</image:caption>
+  </image:image>
+  <image:image>
+    <image:loc>http://www.kapricornmedia.com/images/logo/logoSquare.png</image:loc>
+    <image:title>Kapricorn Media Logo</image:title>
+    <image:caption>Logo for the independent game development team, Kapricorn Media.</image:caption>
+  </image:image>
+  <lastmod>2018-03-22T01:20:02+00:00</lastmod>
+  <changefreq>monthly</changefreq>
+  <priority>1.00</priority>
+</url>
+<url>
+  <loc>http://www.kapricornmedia.com/about/</loc>
+  <lastmod>2018-03-22T01:20:02+00:00</lastmod>
+  <changefreq>monthly</changefreq>
+  <priority>0.8</priority>
+  <image:image>
+    <image:loc>http://www.kapricornmedia.com/images/user1HighRes.png</image:loc>
+    <image:title>Kapricorn Media Artist and Designer</image:title>
+    <image:caption>User icon of Luciano Obregon, artist and designer for Kapricorn Media.</image:caption>
+  </image:image>
+  <image:image>
+    <image:loc>http://www.kapricornmedia.com/images/user2HighRes.png</image:loc>
+    <image:title>Kapricorn Media Programmer</image:title>
+    <image:caption>User icon of Jose M Rico, programmer for Kapricorn Media.</image:caption>
+  </image:image>
+</url>
+<url>
+  <loc>http://www.kapricornmedia.com/blog/</loc>
+  <lastmod>2018-03-22T01:20:02+00:00</lastmod>
+  <changefreq>weekly</changefreq>
+  <priority>0.8</priority>
+</url>
+<url>
+  <loc>http://www.kapricornmedia.com/contact/</loc>
+  <lastmod>2018-03-22T01:20:02+00:00</lastmod>
+  <changefreq>monthly</changefreq>
+  <priority>0.8</priority>
+</url>
+<url>
+  <loc>http://www.kapricornmedia.com/games/</loc>
+  <lastmod>2018-03-22T01:20:02+00:00</lastmod>
+  <changefreq>monthly</changefreq>
+  <priority>0.8</priority>
+</url>
+
+</urlset>

@@ -1,0 +1,19 @@
+@charset "utf-8";
+/* CSS Document */
+
+/* Spacing between post square top and main image */
+.graySpacer {
+	height:18px;
+	background-color:#ECECEC;
+}
+
+/* Spacing between post image and title */
+.postTitle {
+	margin-top:20px;
+}
+
+/* Specific format for all blog post images and videos */
+.entryImg {
+	width:100%;
+	max-width:100%;
+}

@@ -1,0 +1,23 @@
+@charset "utf-8";
+/* CSS Document */
+
+/* Gray post margin within one post */
+.graySpacerEnd {
+	height:10px;
+	background-color:#ECECEC;
+}
+
+/* Spacing between posts and after the final post */
+.postSpacer {
+	height:8px;
+}
+#endSpacer {
+	height:100px;
+}
+
+.entryOutline {
+	min-height:100px;
+}
+.entry {
+	min-height:100px;
+}

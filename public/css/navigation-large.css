@@ -1,0 +1,62 @@
+@charset "utf-8";
+/* CSS Document */
+
+html {
+	margin-top:80px;
+	margin-left:80px;
+}
+
+/* Logo bar: use sidebar for desktop */
+#titleBar {
+	display:none;
+}
+#sidebar {
+	/* FIXED WIDTH */
+	width:200px;
+	height:100%;
+	float:left;
+	position:fixed;
+}
+.logo {
+	width:200px;
+	height:226px;
+}
+.linkSpacer {
+	height:10px;
+}
+.barLink {
+	margin-top:0px;
+	font-family:GalanoGrotesque-Medium;
+	font-size:14px;
+}
+#currentLink {
+	margin-top:4px;
+	color:#A2A2A2;
+}
+
+/* Main scrollable content */
+#content {
+	height:100%;
+	/* FIXED SIDEBAR WIDTH */
+	margin-left:200px;
+}
+.post {
+	width:100%;
+	margin:0 auto;
+}
+
+/* Single post and its components */
+.entry {
+	width:92%;
+	min-width:360px;
+	min-height:300px;
+	margin:0 auto;
+}
+.entryOutline {
+	width:35%;
+	min-width:380px;
+	min-height:300px;
+	margin:0 auto;
+	background-color:#ECECEC;
+	margin-left:25%;
+}
