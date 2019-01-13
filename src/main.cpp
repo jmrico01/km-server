@@ -42,6 +42,7 @@ enum HTTPRequestMethod
 
 enum HTTPVersion
 {
+	HTTP_VERSION_1_0,
 	HTTP_VERSION_1_1,
 
 	HTTP_VERSION_NONE
@@ -146,7 +147,10 @@ bool ParseRequest(int clientSocketFD, char* buffer, int bufferLength,
 	}
 
 	outVersion = HTTP_VERSION_NONE;
-	if (StringCompare(versionString, "HTTP/1.1", 8)) {
+	if (StringCompare(versionString, "HTTP/1.0", 8)) {
+		outVersion = HTTP_VERSION_1_0;
+	}
+	else if (StringCompare(versionString, "HTTP/1.1", 8)) {
 		outVersion = HTTP_VERSION_1_1;
 	}
 	else {
