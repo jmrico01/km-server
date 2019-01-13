@@ -167,12 +167,22 @@ int ParseRequest(int clientSocketFD, char* buffer, int bufferLength,
 
 void WriteStatus(int clientSocketFD, int statusCode, const char* statusMsg)
 {
+	const char* STATUS_TEMPLATE = "HTTP/1.1 %d %s\r\n";
 	char statusLine[HTTP_STATUS_LINE_MAX_LENGTH];
-	snprintf(statusLine, HTTP_STATUS_LINE_MAX_LENGTH,
-		"HTTP/1.1 %d %s\r\n", statusCode, statusMsg);
-	int res = write(clientSocketFD, statusLine, StringLength(statusLine));
-	if (res < 0) {
-		fprintf(stderr, "Failed to write status\n");
+	int n = snprintf(statusLine, HTTP_STATUS_LINE_MAX_LENGTH, STATUS_TEMPLATE, statusCode, statusMsg);
+	if (n < 0 || n >= HTTP_STATUS_LINE_MAX_LENGTH) {
+		fprintf(stderr, "HTTP status line too long: code %d, msg %s\n", statusCode, statusMsg);
+		return;
+	}
+
+	n = write(clientSocketFD, statusLine, StringLength(statusLine));
+	if (n < 0) {
+		fprintf(stderr, "Failed to write status: code %d, msg %s\n", statusCode, statusMsg);
+		return;
+	}
+	n = write(clientSocketFD, "\r\n", 2);
+	if (n < 0) {
+		fprintf(stderr, "Failed to CRLF for status: code %d, msg %s\n", statusCode, statusMsg);
 	}
 }
 
@@ -198,7 +208,7 @@ void HandleGetRequest(const char* uri, int uriLength,
 		path[pathLength + indexFileLength] = '\0';
 	}
 
-	printf("Loading file %s\n", path);
+	printf("Loading and sending file %s\n", path);
 	int fileFD = open(path, O_RDONLY);
 	if (fileFD < 0) {
 		printf("Failed to open file %s\n", path);
@@ -207,15 +217,9 @@ void HandleGetRequest(const char* uri, int uriLength,
 	}
 
 	WriteStatus(clientSocketFD, 200, "OK");
-	int res = write(clientSocketFD, "\r\n", 2);
-	if (res < 0) {
-		fprintf(stderr, "Failed to write CRLF in OK response\n");
-		return;
-	}
 
-	int n;
 	while (true) {
-		n = read(fileFD, buffer, bufferLength);
+		int n = read(fileFD, buffer, bufferLength);
 		if (n < 0) {
 			// TODO Uh oh... we already sent status 200
 			fprintf(stderr, "Failed to read file %s\n", path);
@@ -226,7 +230,7 @@ void HandleGetRequest(const char* uri, int uriLength,
 			break;
 		}
 
-		res = write(clientSocketFD, buffer, n);
+		int res = write(clientSocketFD, buffer, n);
 		if (res < 0) {
 			fprintf(stderr, "Failed to write file contents\n");
 			return;
