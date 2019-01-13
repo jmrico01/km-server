@@ -87,7 +87,8 @@ bool StringCompare(const char* str1, const char* str2, int n)
 	return true;
 }
 
-bool ParseRequest(int clientSocketFD, char* buffer, int bufferLength,
+// Returns length of parsed HTTP request into buffer, or -1 on error
+int ParseRequest(int clientSocketFD, char* buffer, int bufferLength,
 	HTTPRequestMethod& outMethod,
 	const char** outURI, int& outURILength,
 	HTTPVersion& outVersion)
@@ -98,11 +99,11 @@ bool ParseRequest(int clientSocketFD, char* buffer, int bufferLength,
 	int n = read(clientSocketFD, buffer, bufferLength);
 	if (n < 0) {
 		fprintf(stderr, "Failed to read from client socket\n");
-		return false;
+		return -1;
 	}
 
 	if (n == 0) {
-		return false;
+		return -1;
 	}
 
 	const char* methodString = buffer;
@@ -121,12 +122,12 @@ bool ParseRequest(int clientSocketFD, char* buffer, int bufferLength,
 	else {
 		fprintf(stderr, "Unrecognized HTTP request method. Full request:\n");
 		fprintf(stderr, "%.*s\n", n, buffer);
-		return false;
+		return -1;
 	}
 
 	if (firstSpace + 1 >= n) {
 		fprintf(stderr, "Incomplete HTTP request\n");
-		return false;
+		return -1;
 	}
 	*outURI = &buffer[firstSpace + 1];
 	int secondSpace = firstSpace + 1;
@@ -137,7 +138,7 @@ bool ParseRequest(int clientSocketFD, char* buffer, int bufferLength,
 
 	if (secondSpace + 1 >= n) {
 		fprintf(stderr, "Incomplete HTTP request\n");
-		return false;
+		return -1;
 	}
 	const char* versionString = &buffer[secondSpace + 1];
 	int lineEnd = secondSpace + 1;
@@ -152,12 +153,12 @@ bool ParseRequest(int clientSocketFD, char* buffer, int bufferLength,
 	else {
 		fprintf(stderr, "Unrecognized HTTP version. Full request:\n");
 		fprintf(stderr, "%.*s\n", n, buffer);
-		return false;
+		return -1;
 	}
 
 	// TODO read HTTP headers
 
-	return true;
+	return n;
 }
 
 void WriteStatus(int clientSocketFD, int statusCode, const char* statusMsg)
@@ -287,11 +288,10 @@ int main(int argc, char* argv[])
 
 	sockaddr_in clientAddr;
 	socklen_t clientAddrLen = sizeof(clientAddr);
-	int clientSocketFD, n;
 	char* buffer = memory->buffer;
 
 	while (!done) {
-		clientSocketFD = accept(socketFD, (sockaddr*)&clientAddr, &clientAddrLen);
+		int clientSocketFD = accept(socketFD, (sockaddr*)&clientAddr, &clientAddrLen);
 		if (clientSocketFD < 0) {
 			fprintf(stderr, "Failed to accept client connection\n");
 			continue;
@@ -304,9 +304,9 @@ int main(int argc, char* argv[])
 		const char* uri;
 		int uriLength;
 		HTTPVersion version;
-		bool parseResult = ParseRequest(clientSocketFD, buffer, BUFFER_LENGTH,
+		int requestLength = ParseRequest(clientSocketFD, buffer, BUFFER_LENGTH,
 			method, &uri, uriLength, version);
-		if (!parseResult) {
+		if (requestLength < 0) {
 			close(clientSocketFD);
 			continue;
 		}
@@ -321,7 +321,7 @@ int main(int argc, char* argv[])
 			} break;
 			case HTTP_REQUEST_POST: {
 				printf("Implement this! (POST)\n");
-				printf("%.*s\n", n, buffer);
+				printf("%.*s\n", requestLength, buffer);
 
 				const cJSON* json = cJSON_Parse("[1, 2, 3, 4, 5, 6]");
 				cJSON_IsArray(json);
