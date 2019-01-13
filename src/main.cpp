@@ -20,6 +20,8 @@
 
 #define CONNECTION_BUFFER_SIZE KILOBYTES(256)
 
+#define HTTP_STATUS_LINE_MAX_LENGTH 1024
+
 #define URI_PATH_MAX_LENGTH 1024
 
 enum HTTPRequestMethod
@@ -45,9 +47,25 @@ void SignalHandler(int s)
 	done = true;
 }
 
+void PrintSeparator()
+{
+	printf("========================================"
+		"========================================\n");
+}
+
 inline bool IsWhitespace(char c)
 {
 	return c == ' ' || c == '\t' || c == '\n' || c == '\v' || c == '\f' || c == '\r';
+}
+
+int StringLength(const char* str)
+{
+	int length = 0;
+	while (str[length] != '\0') {
+		length++;
+	}
+
+	return length;
 }
 
 bool StringCompare(const char* str1, const char* str2, int n)
@@ -61,28 +79,62 @@ bool StringCompare(const char* str1, const char* str2, int n)
 	return true;
 }
 
+void WriteStatus(int clientSocketFD, int statusCode, const char* statusMsg)
+{
+	char statusLine[HTTP_STATUS_LINE_MAX_LENGTH];
+	snprintf(statusLine, HTTP_STATUS_LINE_MAX_LENGTH,
+		"HTTP/1.1 %d %s\r\n", statusCode, statusMsg);
+	write(clientSocketFD, statusLine, StringLength(statusLine));
+}
+
 void HandleGetRequest(const char* uri, int uriLength,
 	char* buffer, int bufferMaxSize, int clientSocketFD)
 {
 	char path[URI_PATH_MAX_LENGTH];
-	snprintf(path, URI_PATH_MAX_LENGTH, "public%.*s", uriLength, uri);
+	int pathLength = snprintf(path, URI_PATH_MAX_LENGTH, "public%.*s", uriLength, uri);
+	if (pathLength < 0 || pathLength >= URI_PATH_MAX_LENGTH) {
+		printf("URI too long: %.*s\n", uriLength, uri);
+		WriteStatus(clientSocketFD, 400, "Bad Request");
+		return;
+	}
+
+	// Append index.html if necessary
+	const char* indexFile = "index.html";
+	int indexFileLength = StringLength(indexFile);
+	if (path[pathLength - 1] == '/'
+	&& pathLength + indexFileLength < URI_PATH_MAX_LENGTH) {
+		for (int i = 0; i < indexFileLength; i++) {
+			path[pathLength + i] = indexFile[i];
+		}
+		path[pathLength + indexFileLength] = '\0';
+	}
+
 	printf("Loading file %s\n", path);
 	int fileFD = open(path, O_RDONLY);
 	if (fileFD < 0) {
 		printf("Failed to open file %s\n", path);
+		WriteStatus(clientSocketFD, 404, "Not Found");
 		return;
 	}
 
-	int n = read(fileFD, buffer, bufferMaxSize);
-	if (n < 0) {
-		printf("Failed to read file %s\n", path);
-		close(fileFD);
-		return;
+	WriteStatus(clientSocketFD, 200, "OK");
+	write(clientSocketFD, "\r\n", 2);
+
+	int n;
+	while (true) {
+		n = read(fileFD, buffer, bufferMaxSize);
+		if (n < 0) {
+			// TODO Uh oh... we already sent status 200
+			fprintf(stderr, "Failed to read file %s\n", path);
+			close(fileFD);
+			return;
+		}
+		if (n == 0) {
+			break;
+		}
+
+		write(clientSocketFD, buffer, n);
 	}
-
-	printf("file contents:\n%.*s\n", n, buffer);
-
-	write(clientSocketFD, buffer, n);
 
 	close(fileFD);
 }
@@ -146,19 +198,23 @@ int main(int argc, char* argv[])
 		clientSocketFD = accept(socketFD, (sockaddr*)&clientAddr, &clientAddrLen);
 		if (clientSocketFD < 0) {
 			fprintf(stderr, "Failed to accept client connection\n");
-			break;
+			continue;
 		}
 
-		printf("Received client connection, message:\n\n");
+		PrintSeparator();
+		printf("Received client connection\n");
 
 		n = read(clientSocketFD, buffer, CONNECTION_BUFFER_SIZE);
 		if (n < 0) {
 			fprintf(stderr, "Failed to read from client socket\n");
 			close(clientSocketFD);
-			break;
+			continue;
 		}
-		
-		printf("%.*s\n", n, buffer);
+
+		if (n == 0) {
+			close(clientSocketFD);
+			continue;
+		}
 
 		// Parse request according to HTTP/1.1 standard
 		// Source: https://www.w3.org/Protocols/rfc2616/rfc2616-sec5.html
@@ -178,14 +234,15 @@ int main(int argc, char* argv[])
 		else {
 			fprintf(stderr, "Unrecognized HTTP request method. Full request:\n");
 			fprintf(stderr, "%.*s\n", n, buffer);
+			fprintf(stderr, "Length: %d\n", n);
 			close(clientSocketFD);
-			break;
+			continue;
 		}
 
 		if (firstSpace + 1 >= n) {
 			fprintf(stderr, "Incomplete HTTP request\n");
 			close(clientSocketFD);
-			break;
+			continue;
 		}
 		const char* uri = &buffer[firstSpace + 1];
 		int secondSpace = firstSpace + 1;
@@ -197,7 +254,7 @@ int main(int argc, char* argv[])
 		if (secondSpace + 1 >= n) {
 			fprintf(stderr, "Incomplete HTTP request\n");
 			close(clientSocketFD);
-			break;
+			continue;
 		}
 		const char* versionString = &buffer[secondSpace + 1];
 		int lineEnd = secondSpace + 1;
@@ -213,7 +270,7 @@ int main(int argc, char* argv[])
 			fprintf(stderr, "Unrecognized HTTP version. Full request:\n");
 			fprintf(stderr, "%.*s\n", n, buffer);
 			close(clientSocketFD);
-			break;
+			continue;
 		}
 
 		printf("HTTP version %d request, method %d, URI: %.*s\n",
@@ -223,19 +280,25 @@ int main(int argc, char* argv[])
 			case HTTP_REQUEST_GET: {
 				HandleGetRequest(uri, uriLength,
 					buffer, CONNECTION_BUFFER_SIZE, clientSocketFD);
+				/*int fileLength = GetFileContents(uri, uriLength,
+					buffer, CONNECTION_BUFFER_SIZE);
+
+				if (fileLength < 0) {
+					WriteStatus(clientSocketFD, 404, "Not Found");
+					continue;
+				}
+
+				WriteStatus(clientSocketFD, 200, "OK");
+				write(clientSocketFD, "\r\n", 2);
+				write(clientSocketFD, buffer, fileLength);*/
 			} break;
+			case HTTP_REQUEST_POST: {
+				printf("Implement this!\n");
+			}
 			default: {
 				fprintf(stderr, "Unhandled HTTP request method\n");
 			} break;
 		}
-
-		/*n = write(clientSocketFD, "Hello, sailor!", 15);
-		if (n < 0) {
-			fprintf(stderr, "Failed to write to client socket\n");
-			close(clientSocketFD);
-			break;
-		}
-		printf("Sent response to client\n");*/
 
 		close(clientSocketFD);
 		printf("Closed connection with client\n");
