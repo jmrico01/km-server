@@ -1,0 +1,17 @@
+author: "l"
+date: "JUL 5, 2016"
+title: "Rocks"
+
+images: [
+    "../images/logs/cubicrock.png"
+    "../images/logs/rock.jpg"
+]
+video: ""
+
+content: '''
+I just realized we are not making a "low poly" looking game anymore. If you take a look at these rocks from a distance, you'll notice they're blooming with detail.
+
+Falling in love with the (now very popular) excessively low polygonal retro look is very easy. If you're not careful, those huge simple triangles can hurt the intentions of your project! If you want more content, add a bit of detail.
+
+In order to burn the features in such simple geometry I worked the initial meshes in Zbrush. The blue-ish background in the first pic is borrowed from Cinema 4D for testing purposes.
+'''

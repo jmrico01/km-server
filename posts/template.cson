@@ -1,0 +1,12 @@
+# author can be "j" or "l" (Jose or Luciano)
+author: "j"
+date: "MAY 31"
+title: "Two new features"
+
+images: [
+]
+video: ""
+
+content: '''
+Post text content in Markdown format.
+'''

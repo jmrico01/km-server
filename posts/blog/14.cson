@@ -1,0 +1,18 @@
+author: "j"
+date: "AUG 26, 2016"
+title: "Ludum Dare 36"
+
+images: [
+    "../images/logs/LD36.png"
+]
+video: ""
+
+content: '''
+**Kapricorn Media will participate in Ludum Dare 36!**
+
+For those of you who don't know, Ludum Dare is an accelerated game development event (a "game jam"). For teams, the event consists of creating a game entirely in 72 hours, and it **starts today, Friday, August 26, at 9:00 PM eastern time**. We're going to be working all weekend on a new, simpler game for the competition, and we'll have to finish it on Monday, August 29 at 9:00 PM.
+
+The Ludum Dare organizers have yet to announce the theme, so we don't have any details about what the new game will be about. We might not be able to update the blog during the weekend, but we'll at least announce our finished product on Monday. The image we posted shows an interesting 2D game idea that we implemented as a warm-up for the competition. It turned out similar in essence to our big project, and we might develop it further in the future.
+
+We'll be streaming the development process on Twitch, starting today at 9:00 PM, on [my twitch channel](https://www.twitch.tv/patio111). Feel free to join and watch the game grow to completion over the weekend!
+'''
