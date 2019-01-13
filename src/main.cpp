@@ -10,6 +10,8 @@
 #include <sys/types.h>
 #include <netinet/in.h>
 
+#include "cJSON.h"
+
 #define KILOBYTES(b) (b * 1024)
 #define MEGABYTES(b) (KILOBYTES(b) * 1024)
 
@@ -18,11 +20,17 @@
 
 #define LISTEN_BACKLOG_SIZE 5
 
-#define CONNECTION_BUFFER_SIZE KILOBYTES(256)
+#define CONNECTION_BUFFER_SIZE MEGABYTES(1)
 
 #define HTTP_STATUS_LINE_MAX_LENGTH 1024
 
 #define URI_PATH_MAX_LENGTH 1024
+
+struct ServerMemory
+{
+	char buffer[CONNECTION_BUFFER_SIZE];
+	// TODO maybe add a JSON memory block here and use custom allocator
+};
 
 enum HTTPRequestMethod
 {
@@ -84,7 +92,10 @@ void WriteStatus(int clientSocketFD, int statusCode, const char* statusMsg)
 	char statusLine[HTTP_STATUS_LINE_MAX_LENGTH];
 	snprintf(statusLine, HTTP_STATUS_LINE_MAX_LENGTH,
 		"HTTP/1.1 %d %s\r\n", statusCode, statusMsg);
-	write(clientSocketFD, statusLine, StringLength(statusLine));
+	int res = write(clientSocketFD, statusLine, StringLength(statusLine));
+	if (res < 0) {
+		fprintf(stderr, "Failed to write status\n");
+	}
 }
 
 void HandleGetRequest(const char* uri, int uriLength,
@@ -118,7 +129,11 @@ void HandleGetRequest(const char* uri, int uriLength,
 	}
 
 	WriteStatus(clientSocketFD, 200, "OK");
-	write(clientSocketFD, "\r\n", 2);
+	int res = write(clientSocketFD, "\r\n", 2);
+	if (res < 0) {
+		fprintf(stderr, "Failed to write CRLF in OK response\n");
+		return;
+	}
 
 	int n;
 	while (true) {
@@ -133,7 +148,11 @@ void HandleGetRequest(const char* uri, int uriLength,
 			break;
 		}
 
-		write(clientSocketFD, buffer, n);
+		res = write(clientSocketFD, buffer, n);
+		if (res < 0) {
+			fprintf(stderr, "Failed to write file contents\n");
+			return;
+		}
 	}
 
 	close(fileFD);
@@ -154,12 +173,15 @@ int main(int argc, char* argv[])
 
 	sigaction(SIGINT, &sigIntHandler, NULL);
 
-	void* memory = mmap(NULL, CONNECTION_BUFFER_SIZE, PROT_READ | PROT_WRITE,
-		MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-	if (memory == MAP_FAILED) {
+	void* allocatedMemory = mmap(NULL, sizeof(ServerMemory),
+		PROT_READ | PROT_WRITE,
+		MAP_PRIVATE | MAP_ANONYMOUS,
+		-1, 0);
+	if (allocatedMemory == MAP_FAILED) {
         fprintf(stderr, "Failed to allocate memory for server buffer using mmap\n");
         return 1;
 	}
+	ServerMemory* memory = (ServerMemory*)allocatedMemory;
 
     int socketFD = socket(AF_INET, SOCK_STREAM, 0);
     if (socketFD < 0) {
@@ -192,7 +214,7 @@ int main(int argc, char* argv[])
 	sockaddr_in clientAddr;
 	socklen_t clientAddrLen = sizeof(clientAddr);
 	int clientSocketFD, n;
-	char* buffer = (char*)memory;
+	char* buffer = memory->buffer;
 
 	while (!done) {
 		clientSocketFD = accept(socketFD, (sockaddr*)&clientAddr, &clientAddrLen);
@@ -234,7 +256,6 @@ int main(int argc, char* argv[])
 		else {
 			fprintf(stderr, "Unrecognized HTTP request method. Full request:\n");
 			fprintf(stderr, "%.*s\n", n, buffer);
-			fprintf(stderr, "Length: %d\n", n);
 			close(clientSocketFD);
 			continue;
 		}
@@ -273,6 +294,8 @@ int main(int argc, char* argv[])
 			continue;
 		}
 
+		// TODO read HTTP headers
+
 		printf("HTTP version %d request, method %d, URI: %.*s\n",
 			version, method, uriLength, uri);
 		
@@ -280,20 +303,13 @@ int main(int argc, char* argv[])
 			case HTTP_REQUEST_GET: {
 				HandleGetRequest(uri, uriLength,
 					buffer, CONNECTION_BUFFER_SIZE, clientSocketFD);
-				/*int fileLength = GetFileContents(uri, uriLength,
-					buffer, CONNECTION_BUFFER_SIZE);
-
-				if (fileLength < 0) {
-					WriteStatus(clientSocketFD, 404, "Not Found");
-					continue;
-				}
-
-				WriteStatus(clientSocketFD, 200, "OK");
-				write(clientSocketFD, "\r\n", 2);
-				write(clientSocketFD, buffer, fileLength);*/
 			} break;
 			case HTTP_REQUEST_POST: {
-				printf("Implement this!\n");
+				printf("Implement this! (POST)\n");
+				printf("%.*s\n", n, buffer);
+
+				const cJSON* json = cJSON_Parse("[1, 2, 3, 4, 5, 6]");
+				printf("%d", cJSON_IsArray(json));
 			}
 			default: {
 				fprintf(stderr, "Unhandled HTTP request method\n");
@@ -310,3 +326,5 @@ int main(int argc, char* argv[])
 
     return 0;
 }
+
+#include "cJSON.c"
