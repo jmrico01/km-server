@@ -10,7 +10,7 @@
 #include <sys/types.h>
 #include <netinet/in.h>
 
-#include "cJSON.h"
+#include <expat.h>
 
 #define KILOBYTES(b) (b * 1024)
 #define MEGABYTES(b) (KILOBYTES(b) * 1024)
@@ -29,7 +29,6 @@
 struct ServerMemory
 {
 	char buffer[BUFFER_LENGTH];
-	// TODO maybe add a JSON memory block here and use custom allocator
 };
 
 enum HTTPRequestMethod
@@ -186,9 +185,33 @@ void WriteStatus(int clientSocketFD, int statusCode, const char* statusMsg)
 	}
 }
 
+bool ValidateGetURI(const char* uri, int uriLength)
+{
+	int consecutiveDots = 0;
+	for (int i = 0; i < uriLength; i++) {
+		if (uri[i] == '.') {
+			if (consecutiveDots > 0) {
+				return false;
+			}
+			consecutiveDots++;
+		}
+		else {
+			consecutiveDots = 0;
+		}
+	}
+
+	return true;
+}
+
 void HandleGetRequest(const char* uri, int uriLength,
 	char* buffer, int bufferLength, int clientSocketFD)
 {
+	if (!ValidateGetURI(uri, uriLength)) {
+		printf("URI failed validation: %.*s\n", uriLength, uri);
+		WriteStatus(clientSocketFD, 400, "Bad Request");
+		return;
+	}
+
 	char path[URI_PATH_MAX_LENGTH];
 	int pathLength = snprintf(path, URI_PATH_MAX_LENGTH, "public%.*s", uriLength, uri);
 	if (pathLength < 0 || pathLength >= URI_PATH_MAX_LENGTH) {
@@ -240,11 +263,30 @@ void HandleGetRequest(const char* uri, int uriLength,
 	close(fileFD);
 }
 
+void StartXML(void* data, const char* el, const char** attr)
+{
+	printf("start %s\n", el);
+
+	for (int i = 0; attr[i]; i += 2) {
+		printf("%s='%s'", attr[i], attr[i + 1]);
+	}
+}
+
+void EndXML(void* data, const char* el)
+{
+	printf("end %s\n", el);
+}
+
+void DataXML(void* data, const char* content, int length)
+{
+	printf("%.*s\n", length, content);
+}
+
 int main(int argc, char* argv[])
 {
 	if (BUFFER_LENGTH > SSIZE_MAX) {
-        fprintf(stderr, "Buffer size too large for read(...)\n");
-        return 1;
+		fprintf(stderr, "Buffer size too large for read(...)\n");
+		return 1;
 	}
 
 	struct sigaction sigIntHandler;
@@ -261,38 +303,38 @@ int main(int argc, char* argv[])
 		MAP_PRIVATE | MAP_ANONYMOUS,
 		-1, 0);
 	if (allocatedMemory == MAP_FAILED) {
-        fprintf(stderr, "Failed to allocate memory for server buffer using mmap\n");
-        return 1;
+		fprintf(stderr, "Failed to allocate memory for server buffer using mmap\n");
+		return 1;
 	}
 	ServerMemory* memory = (ServerMemory*)allocatedMemory;
 
-    int socketFD = socket(AF_INET, SOCK_STREAM, 0);
-    if (socketFD < 0) {
-        fprintf(stderr, "Failed to open socket\n");
+	int socketFD = socket(AF_INET, SOCK_STREAM, 0);
+	if (socketFD < 0) {
+		fprintf(stderr, "Failed to open socket\n");
 		munmap(allocatedMemory, allocatedMemorySize);
-        return 1;
-    }
+		return 1;
+	}
 
-    sockaddr_in serverAddr = {};
-    serverAddr.sin_family = AF_INET;
-    serverAddr.sin_addr.s_addr = INADDR_ANY;
-    serverAddr.sin_port = htons(PORT_HTTP);
+	sockaddr_in serverAddr = {};
+	serverAddr.sin_family = AF_INET;
+	serverAddr.sin_addr.s_addr = INADDR_ANY;
+	serverAddr.sin_port = htons(PORT_HTTP);
 
-    if (bind(socketFD, (sockaddr*)&serverAddr, sizeof(serverAddr)) < 0) {
-        fprintf(stderr, "Failed to bind server addr with port %d to socket\n", PORT_HTTP);
+	if (bind(socketFD, (sockaddr*)&serverAddr, sizeof(serverAddr)) < 0) {
+		fprintf(stderr, "Failed to bind server addr with port %d to socket\n", PORT_HTTP);
 		close(socketFD);
 		munmap(allocatedMemory, allocatedMemorySize);
-        return 1;
-    }
+		return 1;
+	}
 
-    if (listen(socketFD, LISTEN_BACKLOG_SIZE) < 0) {
-        fprintf(stderr, "Failed to listen to socket on port %d\n", PORT_HTTP);
+	if (listen(socketFD, LISTEN_BACKLOG_SIZE) < 0) {
+		fprintf(stderr, "Failed to listen to socket on port %d\n", PORT_HTTP);
 		close(socketFD);
 		munmap(allocatedMemory, allocatedMemorySize);
-        return 1;
-    }
+		return 1;
+	}
 
-    printf("Server listening on port %d\n", PORT_HTTP);
+	printf("Server listening on port %d\n", PORT_HTTP);
 
 	sockaddr_in clientAddr;
 	socklen_t clientAddrLen = sizeof(clientAddr);
@@ -331,8 +373,24 @@ int main(int argc, char* argv[])
 				printf("Implement this! (POST)\n");
 				printf("%.*s\n", requestLength, buffer);
 
-				const cJSON* json = cJSON_Parse("[1, 2, 3, 4, 5, 6]");
-				cJSON_IsArray(json);
+				XML_Parser parser = XML_ParserCreate(NULL);
+				XML_SetElementHandler(parser, StartXML, EndXML);
+				XML_SetCharacterDataHandler(parser, DataXML);
+
+				int fileFD = open("data/games/saito.xml", O_RDONLY);
+				if (fileFD < 0) {
+					fprintf(stderr, "EROROROROROR\n");
+					continue;
+				}
+
+				int n = read(fileFD, buffer, BUFFER_LENGTH);
+				printf("%.*s\n", n, buffer);
+
+				close(fileFD);
+
+				XML_Parse(parser, buffer, n, true);
+
+				XML_ParserFree(parser);
 			}
 			default: {
 				fprintf(stderr, "Unhandled HTTP request method\n");
@@ -347,7 +405,5 @@ int main(int argc, char* argv[])
 	munmap(allocatedMemory, allocatedMemorySize);
 	printf("Stopped server on port %d\n", PORT_HTTP);
 
-    return 0;
+	return 0;
 }
-
-#include "cJSON.c"

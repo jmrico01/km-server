@@ -3,6 +3,11 @@ mkdir -p ./build
 APP_NAME="km_server"
 
 CPPFLAGS="-m64 -std=c++11 -fno-rtti -fno-exceptions -Werror -Wall"
+INCLUDEDIRS="-I../libs/expat2.2.6/include/"
+
+LINKFLAGS="-fvisibility=hidden"
+LIBDIRS="-L../libs/expat2.2.6/lib/"
+LIBS="-lexpat"
 
 if [ "$1" = "debug" ]; then
     CPPFLAGS+=" -ggdb3"
@@ -13,7 +18,7 @@ elif [ "$1" = "" ]; then
     exit
 fi
 
-gcc $CPPFLAGS \
+gcc $CPPFLAGS $INCLUDEDIRS \
     ./src/main.cpp \
     -o ./build/$APP_NAME \
-    -fvisibility=hidden
+    $LINKFLAGS $LIBDIRS $LIBS
