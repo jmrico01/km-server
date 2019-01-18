@@ -26,9 +26,18 @@
 
 #define URI_PATH_MAX_LENGTH 1024
 
+struct ParseState
+{
+	bool32 firstEntry;
+
+	int contentLength;
+	char content[BUFFER_LENGTH];
+};
+
 struct ServerMemory
 {
 	char buffer[BUFFER_LENGTH];
+	ParseState parseState;
 };
 
 enum HTTPRequestMethod
@@ -47,12 +56,12 @@ enum HTTPVersion
 	HTTP_VERSION_NONE
 };
 
-bool done = false;
+bool done_ = false;
 
 void SignalHandler(int s)
 {
 	printf("Caught signal %d\n", s);
-	done = true;
+	done_ = true;
 }
 
 void PrintSeparator()
@@ -265,21 +274,53 @@ void HandleGetRequest(const char* uri, int uriLength,
 
 void StartXML(void* data, const char* el, const char** attr)
 {
-	printf("start %s\n", el);
+	ParseState* parseState = (ParseState*)data;
+	parseState->contentLength = 0;
 
-	for (int i = 0; attr[i]; i += 2) {
-		printf("%s='%s'", attr[i], attr[i + 1]);
+	if (StringLength(el) == 4 && StringCompare(el, "root", 4)) {
+		printf("{");
+	}
+	else {
+		//printf("--> start <%s>\n", el);
 	}
 }
 
 void EndXML(void* data, const char* el)
 {
-	printf("end %s\n", el);
+	ParseState* parseState = (ParseState*)data;
+
+	if (StringLength(el) == 4 && StringCompare(el, "root", 4)) {
+		printf("}");
+	}
+	else {
+		int last = parseState->contentLength - 1;
+		while (last > 0 && IsWhitespace(parseState->content[last])) {
+			last--;
+		}
+		parseState->contentLength = last + 1;
+		printf("\"%s\": \"%.*s\"\n", el, parseState->contentLength, parseState->content);
+		//printf("--> end <%s>\n", el);
+	}
 }
 
 void DataXML(void* data, const char* content, int length)
 {
-	printf("%.*s\n", length, content);
+	ParseState* parseState = (ParseState*)data;
+
+	int offset = 0;
+	if (parseState->contentLength == 0) {
+		while (offset < length && IsWhitespace(content[offset])) {
+			offset++;
+		}
+	}
+
+	// TODO mem copy
+	int contentStart = parseState->contentLength;
+	for (int i = 0; i < length - offset; i++) {
+		parseState->content[i + contentStart] = content[i + offset];
+	}
+
+	parseState->contentLength += length - offset;
 }
 
 int main(int argc, char* argv[])
@@ -340,7 +381,7 @@ int main(int argc, char* argv[])
 	socklen_t clientAddrLen = sizeof(clientAddr);
 	char* buffer = memory->buffer;
 
-	while (!done) {
+	while (!done_) {
 		int clientSocketFD = accept(socketFD, (sockaddr*)&clientAddr, &clientAddrLen);
 		if (clientSocketFD < 0) {
 			fprintf(stderr, "Failed to accept client connection\n");
@@ -376,6 +417,8 @@ int main(int argc, char* argv[])
 				XML_Parser parser = XML_ParserCreate(NULL);
 				XML_SetElementHandler(parser, StartXML, EndXML);
 				XML_SetCharacterDataHandler(parser, DataXML);
+				XML_SetUserData(parser, &memory->parseState);
+				memory->parseState.firstEntry = true;
 
 				int fileFD = open("data/games/saito.xml", O_RDONLY);
 				if (fileFD < 0) {
