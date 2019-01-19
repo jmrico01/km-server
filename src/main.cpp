@@ -3,6 +3,7 @@
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
@@ -26,12 +27,57 @@
 
 #define URI_PATH_MAX_LENGTH 1024
 
+inline bool IsWhitespace(char c)
+{
+	return c == ' ' || c == '\t' || c == '\n' || c == '\v' || c == '\f' || c == '\r';
+}
+
+int StringLength(const char* str)
+{
+	int length = 0;
+	while (str[length] != '\0') {
+		length++;
+	}
+
+	return length;
+}
+
+bool StringCompare(const char* str1, const char* str2, int n)
+{
+	for (int i = 0; i < n; i++) {
+		if (str1[i] != str2[i]) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
 struct ParseState
 {
-	bool32 firstEntry;
+	bool firstEntry;
+	bool firstEntryData;
+	bool readingEntry;
 
-	int contentLength;
-	char content[BUFFER_LENGTH];
+	int bufferLength;
+	char buffer[BUFFER_LENGTH];
+
+	bool WriteContent(const char* str, int n)
+	{
+		if (bufferLength + n > BUFFER_LENGTH) {
+			return false;
+		}
+
+		memcpy(buffer + bufferLength, str, n);
+		bufferLength += n;
+
+		return true;
+	}
+
+	bool WriteContent(const char* str)
+	{
+		return WriteContent(str, StringLength(str));
+	}
 };
 
 struct ServerMemory
@@ -68,32 +114,6 @@ void PrintSeparator()
 {
 	printf("========================================"
 		"========================================\n");
-}
-
-inline bool IsWhitespace(char c)
-{
-	return c == ' ' || c == '\t' || c == '\n' || c == '\v' || c == '\f' || c == '\r';
-}
-
-int StringLength(const char* str)
-{
-	int length = 0;
-	while (str[length] != '\0') {
-		length++;
-	}
-
-	return length;
-}
-
-bool StringCompare(const char* str1, const char* str2, int n)
-{
-	for (int i = 0; i < n; i++) {
-		if (str1[i] != str2[i]) {
-			return false;
-		}
-	}
-
-	return true;
 }
 
 // Returns length of parsed HTTP request into buffer, or -1 on error
@@ -275,13 +295,24 @@ void HandleGetRequest(const char* uri, int uriLength,
 void StartXML(void* data, const char* el, const char** attr)
 {
 	ParseState* parseState = (ParseState*)data;
-	parseState->contentLength = 0;
 
 	if (StringLength(el) == 4 && StringCompare(el, "root", 4)) {
-		printf("{");
+		parseState->WriteContent("{");
 	}
 	else {
-		//printf("--> start <%s>\n", el);
+		parseState->readingEntry = true;
+		parseState->firstEntryData = true;
+
+		if (parseState->firstEntry) {
+			parseState->firstEntry = false;
+		}
+		else {
+			parseState->WriteContent(",\n");
+		}
+
+		parseState->WriteContent("\"");
+		parseState->WriteContent(el, StringLength(el));
+		parseState->WriteContent("\": \"");
 	}
 }
 
@@ -290,37 +321,65 @@ void EndXML(void* data, const char* el)
 	ParseState* parseState = (ParseState*)data;
 
 	if (StringLength(el) == 4 && StringCompare(el, "root", 4)) {
-		printf("}");
+		parseState->WriteContent("}");
 	}
 	else {
-		int last = parseState->contentLength - 1;
-		while (last > 0 && IsWhitespace(parseState->content[last])) {
+		parseState->readingEntry = false;
+		
+		int last = parseState->bufferLength - 1;
+		while (last > 0 && IsWhitespace(parseState->buffer[last])) {
 			last--;
 		}
-		parseState->contentLength = last + 1;
-		printf("\"%s\": \"%.*s\"\n", el, parseState->contentLength, parseState->content);
-		//printf("--> end <%s>\n", el);
+		parseState->bufferLength = last + 1;
+
+		parseState->WriteContent("\"");
 	}
 }
 
 void DataXML(void* data, const char* content, int length)
 {
 	ParseState* parseState = (ParseState*)data;
+	if (!parseState->readingEntry) {
+		return;
+	}
 
 	int offset = 0;
-	if (parseState->contentLength == 0) {
+	if (parseState->firstEntryData) {
+		parseState->firstEntryData = false;
 		while (offset < length && IsWhitespace(content[offset])) {
 			offset++;
 		}
 	}
 
-	// TODO mem copy
-	int contentStart = parseState->contentLength;
-	for (int i = 0; i < length - offset; i++) {
-		parseState->content[i + contentStart] = content[i + offset];
+	parseState->WriteContent(content + offset, length - offset);
+}
+
+void HandlePostRequest(const char* uri, int uriLength,
+	char* buffer, int bufferLength, ParseState* parseState, int clientSocketFD)
+{
+	XML_Parser parser = XML_ParserCreate(NULL);
+	XML_SetElementHandler(parser, StartXML, EndXML);
+	XML_SetCharacterDataHandler(parser, DataXML);
+	XML_SetUserData(parser, parseState);
+	parseState->bufferLength = 0;
+	parseState->firstEntry = true;
+
+	int fileFD = open("data/games/saito.xml", O_RDONLY);
+	if (fileFD < 0) {
+		fprintf(stderr, "EROROROROROR\n");
+		return;
 	}
 
-	parseState->contentLength += length - offset;
+	int n = read(fileFD, buffer, BUFFER_LENGTH);
+	//printf("%.*s\n", n, buffer);
+
+	close(fileFD);
+
+	XML_Parse(parser, buffer, n, true);
+
+	XML_ParserFree(parser);
+
+	printf("%.*s\n", parseState->bufferLength, parseState->buffer);
 }
 
 int main(int argc, char* argv[])
@@ -379,7 +438,6 @@ int main(int argc, char* argv[])
 
 	sockaddr_in clientAddr;
 	socklen_t clientAddrLen = sizeof(clientAddr);
-	char* buffer = memory->buffer;
 
 	while (!done_) {
 		int clientSocketFD = accept(socketFD, (sockaddr*)&clientAddr, &clientAddrLen);
@@ -395,7 +453,7 @@ int main(int argc, char* argv[])
 		const char* uri;
 		int uriLength;
 		HTTPVersion version;
-		int requestLength = ParseRequest(clientSocketFD, buffer, BUFFER_LENGTH,
+		int requestLength = ParseRequest(clientSocketFD, memory->buffer, BUFFER_LENGTH,
 			method, &uri, uriLength, version);
 		if (requestLength < 0) {
 			close(clientSocketFD);
@@ -408,32 +466,13 @@ int main(int argc, char* argv[])
 		switch (method) {
 			case HTTP_REQUEST_GET: {
 				HandleGetRequest(uri, uriLength,
-					buffer, BUFFER_LENGTH, clientSocketFD);
+					memory->buffer, BUFFER_LENGTH, clientSocketFD);
 			} break;
 			case HTTP_REQUEST_POST: {
-				printf("Implement this! (POST)\n");
-				printf("%.*s\n", requestLength, buffer);
-
-				XML_Parser parser = XML_ParserCreate(NULL);
-				XML_SetElementHandler(parser, StartXML, EndXML);
-				XML_SetCharacterDataHandler(parser, DataXML);
-				XML_SetUserData(parser, &memory->parseState);
-				memory->parseState.firstEntry = true;
-
-				int fileFD = open("data/games/saito.xml", O_RDONLY);
-				if (fileFD < 0) {
-					fprintf(stderr, "EROROROROROR\n");
-					continue;
-				}
-
-				int n = read(fileFD, buffer, BUFFER_LENGTH);
-				printf("%.*s\n", n, buffer);
-
-				close(fileFD);
-
-				XML_Parse(parser, buffer, n, true);
-
-				XML_ParserFree(parser);
+				printf("=== (POST) ===\n");
+				printf("%.*s\n", requestLength, memory->buffer);
+				HandlePostRequest(uri, uriLength,
+					memory->buffer, BUFFER_LENGTH, &memory->parseState, clientSocketFD);
 			}
 			default: {
 				fprintf(stderr, "Unhandled HTTP request method\n");
