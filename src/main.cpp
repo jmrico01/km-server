@@ -62,21 +62,38 @@ struct ParseState
 	int bufferLength;
 	char buffer[BUFFER_LENGTH];
 
-	bool WriteContent(const char* str, int n)
+	bool WriteContent(const char* str, int n, bool escapeNewline)
 	{
 		if (bufferLength + n > BUFFER_LENGTH) {
 			return false;
 		}
 
-		memcpy(buffer + bufferLength, str, n);
-		bufferLength += n;
+		if (escapeNewline) {
+			// TODO fix newline expansion
+			int newlineOffset = 0;
+			for (int i = 0; i < n; i++) {
+				if (str[i] == '\n') {
+					buffer[bufferLength + i + newlineOffset] = '\\';
+					newlineOffset++;
+					buffer[bufferLength + i + newlineOffset] = 'n';
+				}
+				else {
+					buffer[bufferLength + i + newlineOffset] = str[i];
+				}
+			}
+			bufferLength += n + newlineOffset;
+		}
+		else {
+			memcpy(buffer + bufferLength, str, n);
+			bufferLength += n;
+		}
 
 		return true;
 	}
 
-	bool WriteContent(const char* str)
+	bool WriteContent(const char* str, bool escapeNewline)
 	{
-		return WriteContent(str, StringLength(str));
+		return WriteContent(str, StringLength(str), escapeNewline);
 	}
 };
 
@@ -297,7 +314,7 @@ void StartXML(void* data, const char* el, const char** attr)
 	ParseState* parseState = (ParseState*)data;
 
 	if (StringLength(el) == 4 && StringCompare(el, "root", 4)) {
-		parseState->WriteContent("{");
+		parseState->WriteContent("{", false);
 	}
 	else {
 		parseState->readingEntry = true;
@@ -307,12 +324,12 @@ void StartXML(void* data, const char* el, const char** attr)
 			parseState->firstEntry = false;
 		}
 		else {
-			parseState->WriteContent(",\n");
+			parseState->WriteContent(",\n", false);
 		}
 
-		parseState->WriteContent("\"");
-		parseState->WriteContent(el, StringLength(el));
-		parseState->WriteContent("\": \"");
+		parseState->WriteContent("\"", false);
+		parseState->WriteContent(el, StringLength(el), false);
+		parseState->WriteContent("\": \"", false);
 	}
 }
 
@@ -321,7 +338,7 @@ void EndXML(void* data, const char* el)
 	ParseState* parseState = (ParseState*)data;
 
 	if (StringLength(el) == 4 && StringCompare(el, "root", 4)) {
-		parseState->WriteContent("}");
+		parseState->WriteContent("}", false);
 	}
 	else {
 		parseState->readingEntry = false;
@@ -330,9 +347,13 @@ void EndXML(void* data, const char* el)
 		while (last > 0 && IsWhitespace(parseState->buffer[last])) {
 			last--;
 		}
+		while (last > 1 && parseState->buffer[last] == 'n'
+		&& parseState->buffer[last - 1] == '\\') {
+			last -= 2;
+		}
 		parseState->bufferLength = last + 1;
 
-		parseState->WriteContent("\"");
+		parseState->WriteContent("\"", false);
 	}
 }
 
@@ -351,7 +372,7 @@ void DataXML(void* data, const char* content, int length)
 		}
 	}
 
-	parseState->WriteContent(content + offset, length - offset);
+	parseState->WriteContent(content + offset, length - offset, true);
 }
 
 void HandlePostRequest(const char* uri, int uriLength,
@@ -380,6 +401,17 @@ void HandlePostRequest(const char* uri, int uriLength,
 	XML_ParserFree(parser);
 
 	printf("%.*s\n", parseState->bufferLength, parseState->buffer);
+
+	WriteStatus(clientSocketFD, 200, "OK");
+	int res;
+	res = write(clientSocketFD, "[", 1);
+	res = write(clientSocketFD, parseState->buffer, parseState->bufferLength);
+	res = write(clientSocketFD, "]", 1);
+	if (res < 0) {
+		fprintf(stderr, "Failed to write parsed contents\n");
+		return;
+	}
+
 }
 
 int main(int argc, char* argv[])
@@ -430,7 +462,7 @@ int main(int argc, char* argv[])
 	if (listen(socketFD, LISTEN_BACKLOG_SIZE) < 0) {
 		fprintf(stderr, "Failed to listen to socket on port %d\n", PORT_HTTP);
 		close(socketFD);
-		munmap(allocatedMemory, allocatedMemorySize);
+	munmap(allocatedMemory, allocatedMemorySize);
 		return 1;
 	}
 

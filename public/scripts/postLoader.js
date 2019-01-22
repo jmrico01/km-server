@@ -118,6 +118,7 @@ function CreateElementFromHTML(htmlString)
     return div.firstChild;
 }
 
+/*
 function GetJSON(path, success, error)
 {
     var xhr = new XMLHttpRequest();
@@ -139,6 +140,7 @@ function GetJSON(path, success, error)
     xhr.open("GET", path, true);
     xhr.send();
 }
+*/
 
 function PostJSON(path, sendData, success, error) {
     var xhr = new XMLHttpRequest();
@@ -147,6 +149,7 @@ function PostJSON(path, sendData, success, error) {
     xhr.onload = function() {
         if (xhr.status === 200) {
             if (success) {
+                console.log(xhr.responseText);
                 success(JSON.parse(xhr.responseText));
             }
         }
