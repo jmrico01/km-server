@@ -1,3 +1,4 @@
+#include <dirent.h>
 #include <fcntl.h>
 #include <limits.h>
 #include <signal.h>
@@ -25,7 +26,9 @@
 
 #define HTTP_STATUS_LINE_MAX_LENGTH 1024
 
-#define URI_PATH_MAX_LENGTH 1024
+#define URI_PATH_MAX_LENGTH 256
+
+#define DATA_MAX_FILES_PER_DIR 1024
 
 inline bool IsWhitespace(char c)
 {
@@ -58,6 +61,7 @@ struct ParseState
 	bool firstEntry;
 	bool firstEntryData;
 	bool readingEntry;
+	bool readingArray;
 
 	int bufferLength;
 	char buffer[BUFFER_LENGTH];
@@ -100,6 +104,7 @@ struct ParseState
 struct ServerMemory
 {
 	char buffer[BUFFER_LENGTH];
+	char dirFilePaths[DATA_MAX_FILES_PER_DIR][URI_PATH_MAX_LENGTH];
 	ParseState parseState;
 };
 
@@ -259,7 +264,8 @@ void HandleGetRequest(const char* uri, int uriLength,
 	}
 
 	char path[URI_PATH_MAX_LENGTH];
-	int pathLength = snprintf(path, URI_PATH_MAX_LENGTH, "public%.*s", uriLength, uri);
+	// TODO use memcpy
+	int pathLength = snprintf(path, URI_PATH_MAX_LENGTH, "./public%.*s", uriLength, uri);
 	if (pathLength < 0 || pathLength >= URI_PATH_MAX_LENGTH) {
 		printf("URI too long: %.*s\n", uriLength, uri);
 		WriteStatus(clientSocketFD, 400, "Bad Request");
@@ -267,10 +273,32 @@ void HandleGetRequest(const char* uri, int uriLength,
 	}
 
 	// Append index.html if necessary
-	const char* indexFile = "index.html";
-	int indexFileLength = StringLength(indexFile);
-	if (path[pathLength - 1] == '/'
-	&& pathLength + indexFileLength < URI_PATH_MAX_LENGTH) {
+	if (path[pathLength - 1] != '/') {
+		int last = pathLength - 1;
+		bool dotBeforeSlash = false;
+		while (last >= 0 && path[last] != '/') {
+			if (path[last] == '.') {
+				dotBeforeSlash = true;
+			}
+			last--;
+		}
+		if (last != pathLength - 1 && !dotBeforeSlash) {
+			if (pathLength + 1 >= URI_PATH_MAX_LENGTH) {
+				printf("URI + slash too long: %.*s\n", uriLength, uri);
+				WriteStatus(clientSocketFD, 400, "Bad Request");
+				return;
+			}
+			path[pathLength++] = '/';
+		}
+	}
+	if (path[pathLength - 1] == '/') {
+		const char* indexFile = "index.html";
+		int indexFileLength = StringLength(indexFile);
+		if (pathLength + indexFileLength >= URI_PATH_MAX_LENGTH) {
+			printf("URI + index.html too long: %.*s\n", uriLength, uri);
+			WriteStatus(clientSocketFD, 400, "Bad Request");
+			return;
+		}
 		for (int i = 0; i < indexFileLength; i++) {
 			path[pathLength + i] = indexFile[i];
 		}
@@ -329,7 +357,14 @@ void StartXML(void* data, const char* el, const char** attr)
 
 		parseState->WriteContent("\"", false);
 		parseState->WriteContent(el, StringLength(el), false);
-		parseState->WriteContent("\": \"", false);
+		if (StringLength(el) == 6 && StringCompare(el, "images", 6)) {
+			parseState->WriteContent("\": [", false);
+			parseState->WriteContent("\"", false); // TODO tmp
+			parseState->readingArray = true;
+		}
+		else {
+			parseState->WriteContent("\": \"", false);
+		}
 	}
 }
 
@@ -353,7 +388,15 @@ void EndXML(void* data, const char* el)
 		}
 		parseState->bufferLength = last + 1;
 
-		parseState->WriteContent("\"", false);
+		if (StringLength(el) == 6 && StringCompare(el, "images", 6)) {
+			parseState->WriteContent("\"", false); // TODO tmp
+			parseState->WriteContent("]", false);
+			parseState->readingArray = false;
+		}
+		else {
+			parseState->WriteContent("\"", false);
+		}
+
 	}
 }
 
@@ -376,42 +419,81 @@ void DataXML(void* data, const char* content, int length)
 }
 
 void HandlePostRequest(const char* uri, int uriLength,
-	char* buffer, int bufferLength, ParseState* parseState, int clientSocketFD)
+	char* buffer, int bufferLength,
+	char dirFilePaths[DATA_MAX_FILES_PER_DIR][URI_PATH_MAX_LENGTH],
+	ParseState* parseState, int clientSocketFD)
 {
-	XML_Parser parser = XML_ParserCreate(NULL);
-	XML_SetElementHandler(parser, StartXML, EndXML);
-	XML_SetCharacterDataHandler(parser, DataXML);
-	XML_SetUserData(parser, parseState);
-	parseState->bufferLength = 0;
-	parseState->firstEntry = true;
-
-	int fileFD = open("data/games/saito.xml", O_RDONLY);
-	if (fileFD < 0) {
-		fprintf(stderr, "EROROROROROR\n");
+	const char* DIR_PATH = "data/games/";
+	const int DIR_PATH_LENGTH = StringLength(DIR_PATH);
+	DIR* dir = opendir(DIR_PATH);
+	if (dir == NULL) {
+		fprintf(stderr, "Failed to open data dir\n");
 		return;
 	}
-
-	int n = read(fileFD, buffer, BUFFER_LENGTH);
-	//printf("%.*s\n", n, buffer);
-
-	close(fileFD);
-
-	XML_Parse(parser, buffer, n, true);
-
-	XML_ParserFree(parser);
-
-	printf("%.*s\n", parseState->bufferLength, parseState->buffer);
 
 	WriteStatus(clientSocketFD, 200, "OK");
-	int res;
-	res = write(clientSocketFD, "[", 1);
-	res = write(clientSocketFD, parseState->buffer, parseState->bufferLength);
-	res = write(clientSocketFD, "]", 1);
-	if (res < 0) {
-		fprintf(stderr, "Failed to write parsed contents\n");
-		return;
+	write(clientSocketFD, "[", 1);
+
+	int numFiles = 0;
+	dirent* dirEntry;
+	while ((dirEntry = readdir(dir)) != NULL) {
+		const char* name = dirEntry->d_name;
+		int nameLength = StringLength(name);
+		if (nameLength > 4 && StringCompare(name + nameLength - 4, ".xml", 4)) {
+			char* filePath = dirFilePaths[numFiles];
+			if (DIR_PATH_LENGTH + nameLength >= URI_PATH_MAX_LENGTH) {
+				fprintf(stderr, "Path too long for XML file %s in dir %s\n", name, DIR_PATH);
+				continue;
+			}
+			memcpy(filePath, DIR_PATH, DIR_PATH_LENGTH);
+			memcpy(filePath + DIR_PATH_LENGTH, name, nameLength);
+			filePath[DIR_PATH_LENGTH + nameLength] = '\0';
+
+			numFiles++;
+		}
 	}
 
+	closedir(dir);
+
+	for (int i = 0; i < numFiles; i++) {
+		const char* filePath = dirFilePaths[i];
+		int fileFD = open(filePath, O_RDONLY);
+		if (fileFD < 0) {
+			fprintf(stderr, "Error opening XML file %s\n", filePath);
+			continue;
+		}
+		int n = read(fileFD, buffer, BUFFER_LENGTH);
+		if (n < 0) {
+			fprintf(stderr, "Failed to read from XML file %s\n", filePath);
+			close(fileFD);
+			continue;
+		}
+		close(fileFD);
+
+		XML_Parser parser = XML_ParserCreate(NULL);
+		XML_SetElementHandler(parser, StartXML, EndXML);
+		XML_SetCharacterDataHandler(parser, DataXML);
+		XML_SetUserData(parser, parseState);
+		parseState->bufferLength = 0;
+		parseState->firstEntry = true;
+
+		XML_Parse(parser, buffer, n, true);
+
+		XML_ParserFree(parser);
+
+		// printf("%.*s\n", parseState->bufferLength, parseState->buffer);
+
+		if (i != 0) {
+			write(clientSocketFD, ",", 1);
+		}
+		int res = write(clientSocketFD, parseState->buffer, parseState->bufferLength);
+		if (res < 0) {
+			fprintf(stderr, "Failed to write parsed file contents for %s\n", filePath);
+			continue;
+		}
+	}
+
+	write(clientSocketFD, "]", 1);
 }
 
 int main(int argc, char* argv[])
@@ -504,7 +586,8 @@ int main(int argc, char* argv[])
 				printf("=== (POST) ===\n");
 				printf("%.*s\n", requestLength, memory->buffer);
 				HandlePostRequest(uri, uriLength,
-					memory->buffer, BUFFER_LENGTH, &memory->parseState, clientSocketFD);
+					memory->buffer, BUFFER_LENGTH,
+					memory->dirFilePaths, &memory->parseState, clientSocketFD);
 			}
 			default: {
 				fprintf(stderr, "Unhandled HTTP request method\n");
