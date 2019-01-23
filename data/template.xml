@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<root>
+
+<!-- author can be "j" or "l" (Jose or Luciano) -->
+<author>
+j
+</author>
+
+<date>
+MAY 25, 2016
+</date>
+
+<title>
+Post Title
+</title>
+
+<images>
+Image URI #1
+Image URI #2
+</images>
+
+<video>
+Video URI
+</video>
+
+<content>
+Post text content in Markdown format.
+</content>
+
+</root>

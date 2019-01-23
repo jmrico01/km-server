@@ -174,7 +174,7 @@ window.onload = function() {
     posts.id = "posts";
     postLoaderInfo.parentElement.appendChild(posts);
     
-    var loadPath = "/posts?type=" + type;
+    var loadPath = "/" + type;
     PostJSON(loadPath, toLoad, function(data) {
         var mdConverter = new showdown.Converter();
 

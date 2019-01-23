@@ -26,7 +26,7 @@
 
 #define HTTP_STATUS_LINE_MAX_LENGTH 1024
 
-#define URI_PATH_MAX_LENGTH 256
+#define URI_PATH_MAX_LENGTH 64
 
 #define DATA_MAX_FILES_PER_DIR 1024
 
@@ -263,14 +263,18 @@ void HandleGetRequest(const char* uri, int uriLength,
 		return;
 	}
 
+	const char* PUBLIC_DIR_PATH = "./public";
+	const int PUBLIC_DIR_PATH_LENGTH = StringLength(PUBLIC_DIR_PATH);
 	char path[URI_PATH_MAX_LENGTH];
-	// TODO use memcpy
-	int pathLength = snprintf(path, URI_PATH_MAX_LENGTH, "./public%.*s", uriLength, uri);
-	if (pathLength < 0 || pathLength >= URI_PATH_MAX_LENGTH) {
-		printf("URI too long: %.*s\n", uriLength, uri);
+	int pathLength = PUBLIC_DIR_PATH_LENGTH + uriLength;
+	if (pathLength >= URI_PATH_MAX_LENGTH) {
+		fprintf(stderr, "URI full path too long: %.*s\n", uriLength, uri);
 		WriteStatus(clientSocketFD, 400, "Bad Request");
 		return;
 	}
+	memcpy(path, PUBLIC_DIR_PATH, PUBLIC_DIR_PATH_LENGTH);
+	memcpy(path + PUBLIC_DIR_PATH_LENGTH, uri, uriLength);
+	path[pathLength] = '\0';
 
 	// Append index.html if necessary
 	if (path[pathLength - 1] != '/') {
@@ -423,16 +427,29 @@ void HandlePostRequest(const char* uri, int uriLength,
 	char dirFilePaths[DATA_MAX_FILES_PER_DIR][URI_PATH_MAX_LENGTH],
 	ParseState* parseState, int clientSocketFD)
 {
-	const char* DIR_PATH = "data/games/";
-	const int DIR_PATH_LENGTH = StringLength(DIR_PATH);
-	DIR* dir = opendir(DIR_PATH);
-	if (dir == NULL) {
-		fprintf(stderr, "Failed to open data dir\n");
+	const char* DATA_DIR_PATH = "./data";
+	const int DATA_DIR_PATH_LENGTH = StringLength(DATA_DIR_PATH);
+
+	char fullDirPath[URI_PATH_MAX_LENGTH];
+	int fullDirPathLength = DATA_DIR_PATH_LENGTH + uriLength;
+	if (DATA_DIR_PATH_LENGTH + uriLength >= URI_PATH_MAX_LENGTH) {
+		fprintf(stderr, "Full dir path too long, URI %.*s\n", uriLength, uri);
+		WriteStatus(clientSocketFD, 400, "Bad Request");
 		return;
 	}
+	memcpy(fullDirPath, DATA_DIR_PATH, DATA_DIR_PATH_LENGTH);
+	memcpy(fullDirPath + DATA_DIR_PATH_LENGTH, uri, uriLength);
+	if (fullDirPath[fullDirPathLength - 1] != '/') {
+		fullDirPath[fullDirPathLength++] = '/'; // TODO not bounds-checking
+	}
+	fullDirPath[fullDirPathLength] = '\0';
 
-	WriteStatus(clientSocketFD, 200, "OK");
-	write(clientSocketFD, "[", 1);
+	DIR* dir = opendir(fullDirPath);
+	if (dir == NULL) {
+		fprintf(stderr, "Failed to open data dir\n");
+		WriteStatus(clientSocketFD, 400, "Bad Request");
+		return;
+	}
 
 	int numFiles = 0;
 	dirent* dirEntry;
@@ -441,19 +458,22 @@ void HandlePostRequest(const char* uri, int uriLength,
 		int nameLength = StringLength(name);
 		if (nameLength > 4 && StringCompare(name + nameLength - 4, ".xml", 4)) {
 			char* filePath = dirFilePaths[numFiles];
-			if (DIR_PATH_LENGTH + nameLength >= URI_PATH_MAX_LENGTH) {
-				fprintf(stderr, "Path too long for XML file %s in dir %s\n", name, DIR_PATH);
+			if (fullDirPathLength + nameLength >= URI_PATH_MAX_LENGTH) {
+				fprintf(stderr, "Path too long for XML file %s in dir %s\n", name, fullDirPath);
 				continue;
 			}
-			memcpy(filePath, DIR_PATH, DIR_PATH_LENGTH);
-			memcpy(filePath + DIR_PATH_LENGTH, name, nameLength);
-			filePath[DIR_PATH_LENGTH + nameLength] = '\0';
+			memcpy(filePath, fullDirPath, fullDirPathLength);
+			memcpy(filePath + fullDirPathLength, name, nameLength);
+			filePath[fullDirPathLength + nameLength] = '\0';
 
 			numFiles++;
 		}
 	}
 
 	closedir(dir);
+
+	WriteStatus(clientSocketFD, 200, "OK");
+	write(clientSocketFD, "[", 1);
 
 	for (int i = 0; i < numFiles; i++) {
 		const char* filePath = dirFilePaths[i];
