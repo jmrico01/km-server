@@ -1,13 +1,16 @@
-author: "j"
-date: "OCT 19, 2016"
-title: "Storm O.S."
+<?xml version="1.0" encoding="UTF-8"?>
 
-images: [
-    "../images/logs/stormOS.png"
-]
-video: ""
+<root>
 
-content: '''
+<author>
+j
+</author><date>
+OCT 19, 2016
+</date><title>
+Storm O.S.
+</title><images>
+['../images/logs/stormOS.png']
+</images><content>
 Ludum Dare 36 is over, and our entry is finished!
 
 In Storm O.S. you play as an android that has been mysteriously freed of its Master, and attempts to solve the mysteries of the ancient Storm Operating System. This short game is the product of 3 days of work.
@@ -15,4 +18,6 @@ In Storm O.S. you play as an android that has been mysteriously freed of its Mas
 Visit our [Ludum Dare entry page](http://ludumdare.com/compo/ludum-dare-36/?action=preview&uid=110077) to play the game! Available for both Windows and Mac.
 
 Many thanks to [Massimo Pericolo](https://soundcloud.com/massimo-pericolo) for the incredible soundtrack.
-'''
+</content>
+
+</root>

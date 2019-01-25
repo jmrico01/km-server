@@ -1,20 +1,25 @@
-author: "j"
-date: "JUN 13, 2016"
-title: "Landing page animation"
+<?xml version="1.0" encoding="UTF-8"?>
 
-images: [
-    "../images/logs/Coding Log 3.png"
-]
-video: ""
+<root>
 
-content: '''
+<author>
+j
+</author><date>
+JUN 13, 2016
+</date><title>
+Landing page animation
+</title><images>
+['../images/logs/Coding Log 3.png']
+</images><content>
 Glitch art looks amazing, and so does film grain. A combination of both sounds perfect. This is what Luciano came up with for our logo in the new website's landing page. I really liked it. However, we soon realized it wasn't really perfect, for purely practical reasons. It was an mp4 file of about 50MB, and with more glitch transitions, it would be even larger (disclaimer: there were probably better codecs and/or export options, but I believe my technique ends up beating most video formats in file size, simply because it's tailored very specifically for our needs).
 
 The solution: I programmed what you could consider a very specific codec for our logo animation. It has two main features:
 
-**1\. A custom film grain overlay.** This is calculated client-side (JavaScript), and is what "compresses" the animation the most. Instead of sending a 10-second long mp4 file of a still image with film grain, I simply send the image, and the client's computer is kind enough to calculate the film grain effect for me. Thanks, JavaScript!
+**1. A custom film grain overlay.** This is calculated client-side (JavaScript), and is what "compresses" the animation the most. Instead of sending a 10-second long mp4 file of a still image with film grain, I simply send the image, and the client's computer is kind enough to calculate the film grain effect for me. Thanks, JavaScript!
 
-**2\. A frame-by-frame animation system** for each glitch transition. The most important part is that the frames for the transition animation are downloaded in the background, while a still image with film grain is being displayed. I can delay the transition until all the frames are loaded. This is usually not necessary, because the image files by themselves aren't that big.
+**2. A frame-by-frame animation system** for each glitch transition. The most important part is that the frames for the transition animation are downloaded in the background, while a still image with film grain is being displayed. I can delay the transition until all the frames are loaded. This is usually not necessary, because the image files by themselves aren't that big.
 
 This "codec" (sounds like a bigger deal when I call it a codec) did involve a lot of nasty hard-coding, but it's readable and easily changeable. It reduced the amount of data that you need to download in the landing page from about 50MB to about 8MB. I'm also quite certain that it's one of the most efficient ways to transfer this information.
-'''
+</content>
+
+</root>

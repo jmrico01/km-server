@@ -1,13 +1,19 @@
-author: "j"
-date: "JUN 27, 2016"
-title: "PhysX Demo"
+<?xml version="1.0" encoding="UTF-8"?>
 
-images: [
-]
-video: "https://player.vimeo.com/video/172488727?byline=0&portrait=0&title=0"
+<root>
 
-content: '''
+<author>
+j
+</author><date>
+JUN 27, 2016
+</date><title>
+PhysX Demo
+</title><video>
+https://player.vimeo.com/video/172488727?byline=0&portrait=0&title=0
+</video><content>
 Project Morph now officially supports NVIDIA PhysX! After struggling with annoyances such as C runtime library linkage options in the Windows platform, I finally managed to build the PhysX library from source and integrate it properly into the game engine.
 
 This lovely showcase video was captured and edited by Luciano. Props to him for the amazing montage.
-'''
+</content>
+
+</root>

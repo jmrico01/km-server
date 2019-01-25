@@ -1,17 +1,21 @@
-author: "l"
-date: "JUL 5, 2016"
-title: "Rocks"
+<?xml version="1.0" encoding="UTF-8"?>
 
-images: [
-    "../images/logs/cubicrock.png"
-    "../images/logs/rock.jpg"
-]
-video: ""
+<root>
 
-content: '''
+<author>
+l
+</author><date>
+JUL 5, 2016
+</date><title>
+Rocks
+</title><images>
+['../images/logs/cubicrock.png', '../images/logs/rock.jpg']
+</images><content>
 I just realized we are not making a "low poly" looking game anymore. If you take a look at these rocks from a distance, you'll notice they're blooming with detail.
 
 Falling in love with the (now very popular) excessively low polygonal retro look is very easy. If you're not careful, those huge simple triangles can hurt the intentions of your project! If you want more content, add a bit of detail.
 
 In order to burn the features in such simple geometry I worked the initial meshes in Zbrush. The blue-ish background in the first pic is borrowed from Cinema 4D for testing purposes.
-'''
+</content>
+
+</root>

@@ -1,13 +1,16 @@
-author: "j"
-date: "JUL 27, 2016"
-title: "Deferred Shading"
+<?xml version="1.0" encoding="UTF-8"?>
 
-images: [
-    "../images/logs/Coding Log 5.png"
-]
-video: ""
+<root>
 
-content: '''
+<author>
+j
+</author><date>
+JUL 27, 2016
+</date><title>
+Deferred Shading
+</title><images>
+['../images/logs/Coding Log 5.png']
+</images><content>
 As we continue our effort to materialize the huge list of game ideas, it’s becoming clearer to me that the game’s lighting engine needs to be very robust, and that it must be able to handle multiple light sources efficiently. The traditional forward rendering pipeline isn't particularly great in this regard, as the environment is also prone to have multiple overlapped objects on screen, resulting in wasted per-fragment calculations.
 
 Given these observations, I've decided to implement a deferred shading pipeline. This pipeline works by rendering data from the scene into several textures, which are collectively called the **geometry buffer**, and deferring or delaying the actual lighting calculations until the end, when the geometry buffer is filled up. There are many resources available online that explain this subject in much greater detail. There are so many helpful tutorials out there in general; a big shoutout to anyone that writes them... I owe you at least 70% of my coding knowledge!
@@ -23,4 +26,6 @@ Anyways, back to deferred shading - so far, I'm storing the geometry buffer data
 Once I have these textures, I can run a fragment shader to pass through every pixel on the screen and compute its shading, according to all the scene lights. This reduces the complexity of light calculations from O(L * N) to O(L * P), for L lights, N game objects, and P total pixels on the screen (in short, adding objects to the scene now doesn't affect shading performance significantly). This comes at the cost of having difficulties representing a wide variety of material properties, such as transparency, but that can be fixed with some work.
 
 Having said all this, I'll leave you with the mystery of who the creature in the screenshots might be. It has something to do with trees.
-'''
+</content>
+
+</root>

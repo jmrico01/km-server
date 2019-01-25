@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<root>
+
+<author>
+j
+</author><date>
+JUN 23, 2016
+</date><title>
+Basic lighting engine
+</title><images>
+['../images/logs/Coding Log 4.png']
+</images><content>
+I've had this done for about a week now, but we've both been busy shifting our focus back to the game itself rather than our website. In any case, I've built a very basic lighting system, which has, so far, four very standard components:
+
+**1. Ambient light:** A flat, uniform light that reaches all objects in the scene. In the future, this will contain an ambient occlusion component, which we believe will be one of the most important components of our lighting engine.
+
+**2. Diffuse reflection:** This is a light component that depends only on the orientation of the surface being lit with respect to the light. This supports both directional lights and point (omni-directional) lights.
+
+**3. Specular reflection:** This is a more "metallic" light component. It occurs when light from a source directly reflects away from a surface and goes into the viewer's eye. Thus, it depends on the position of the light, the orientation of the surface, and the position of the viewer. This supports both directional light and point lights.
+
+**4. Hard-edged shadows:** What do you know? Lights cast shadows. Computing these is tricky, especially getting the edges to soften in a nice-looking way. This is still very much a work in progress. So far, only directional lights cast shadows. Point lights will require a 3D shadow map, represented by a cubic texture. Haven't quite gotten there yet.
+</content>
+
+</root>

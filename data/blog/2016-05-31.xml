@@ -1,14 +1,19 @@
-author: "l"
-date: "MAY 31, 2016"
-title: "Ascended Being"
+<?xml version="1.0" encoding="UTF-8"?>
 
-images: [
-    "../images/logs/Headmaster v1.jpg"
-]
-video: ""
+<root>
 
-content: '''
+<author>
+l
+</author><date>
+MAY 31, 2016
+</date><title>
+Ascended Being
+</title><images>
+['../images/logs/Headmaster v1.jpg']
+</images><content>
 The only character you're going to be able to have a conversation with in this game is a huge floating head.
 
 **THE HEADMASTER** is a dark, timeless voice of the occult and the pilot of the main character's ship. More to come...
-'''
+</content>
+
+</root>
