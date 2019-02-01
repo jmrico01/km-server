@@ -9,7 +9,7 @@ JUN 2, 2016
 </date><title>
 Two more major updates
 </title><images>
-['../images/logs/Coding Log 2.1.png']
+../images/logs/Coding Log 2.1.png
 </images><content>
 **1. Game engine from scratch.** Due to some of the game’s main characteristics – most importantly, the low-poly graphical style and the need for different world scales (microbiomes) – Unity is looking less and less promising as a main game engine. I’ll be working on our own C++ / OpenGL game engine, built from scratch. Wish me luck!
 

@@ -9,7 +9,7 @@ JUL 27, 2016
 </date><title>
 Deferred Shading
 </title><images>
-['../images/logs/Coding Log 5.png']
+../images/logs/Coding Log 5.png
 </images><content>
 As we continue our effort to materialize the huge list of game ideas, it’s becoming clearer to me that the game’s lighting engine needs to be very robust, and that it must be able to handle multiple light sources efficiently. The traditional forward rendering pipeline isn't particularly great in this regard, as the environment is also prone to have multiple overlapped objects on screen, resulting in wasted per-fragment calculations.
 

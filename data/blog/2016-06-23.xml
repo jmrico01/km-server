@@ -9,7 +9,7 @@ JUN 23, 2016
 </date><title>
 Basic lighting engine
 </title><images>
-['../images/logs/Coding Log 4.png']
+../images/logs/Coding Log 4.png
 </images><content>
 I've had this done for about a week now, but we've both been busy shifting our focus back to the game itself rather than our website. In any case, I've built a very basic lighting system, which has, so far, four very standard components:
 
