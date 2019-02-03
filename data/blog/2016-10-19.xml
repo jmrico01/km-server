@@ -4,13 +4,21 @@
 
 <author>
 j
-</author><date>
+</author>
+
+<date>
 OCT 19, 2016
-</date><title>
+</date>
+
+<title>
 Storm O.S.
-</title><images>
+</title>
+
+<images>
 ../images/logs/stormOS.png
-</images><content>
+</images>
+
+<content>
 Ludum Dare 36 is over, and our entry is finished!
 
 In Storm O.S. you play as an android that has been mysteriously freed of its Master, and attempts to solve the mysteries of the ancient Storm Operating System. This short game is the product of 3 days of work.

@@ -4,11 +4,17 @@
 
 <author>
 j
-</author><date>
+</author>
+
+<date>
 JUN 5, 2016
-</date><title>
+</date>
+
+<title>
 Things got too crazy
-</title><content>
+</title>
+
+<content>
 Okay, backtrack…
 
 I might have gotten a little too crazy by starting with the aesthetics for the ant tunnels. In the last log, I coded some procedural generation for the way the tunnels look (entangled cylinders that move randomly around a cylindrical shell to form spaghetti textured walls). However, this has many possible complications, and in the end, is almost completely for aesthetic purposes. I’ve decided to take a step back and think of more practical issues, such as coding the procedural generation of the overall tunnel structure. This should be simpler and much more practical, and will allow us to implement other important things, such as the actual ant NPCs.

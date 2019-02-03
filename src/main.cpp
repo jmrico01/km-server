@@ -66,26 +66,39 @@ struct ParseState
 	int bufferLength;
 	char buffer[BUFFER_LENGTH];
 
-	bool WriteContent(const char* str, int n, bool escapeNewline)
+	bool WriteContent(const char* str, int n)
 	{
 		if (bufferLength + n > BUFFER_LENGTH) {
 			return false;
 		}
 
-		if (escapeNewline) {
+		if (readingEntry) {
 			// TODO fix newline expansion
-			int newlineOffset = 0;
+			int offset = 0;
 			for (int i = 0; i < n; i++) {
 				if (str[i] == '\n') {
-					buffer[bufferLength + i + newlineOffset] = '\\';
-					newlineOffset++;
-					buffer[bufferLength + i + newlineOffset] = 'n';
+					buffer[bufferLength + offset] = '\\';
+					offset++;
+					buffer[bufferLength + offset] = 'n';
+				}
+				else if (str[i] == '"') {
+					buffer[bufferLength + offset] = '\\';
+					offset++;
+					buffer[bufferLength + offset] = '"';
+				}
+				else if (readingArray && str[i] == ',') {
+					buffer[bufferLength + offset] = '"';
+					offset++;
+					buffer[bufferLength + offset] = ',';
+					offset++;
+					buffer[bufferLength + offset] = '"';
 				}
 				else {
-					buffer[bufferLength + i + newlineOffset] = str[i];
+					buffer[bufferLength + offset] = str[i];
 				}
+				offset++;
 			}
-			bufferLength += n + newlineOffset;
+			bufferLength += offset;
 		}
 		else {
 			memcpy(buffer + bufferLength, str, n);
@@ -95,9 +108,9 @@ struct ParseState
 		return true;
 	}
 
-	bool WriteContent(const char* str, bool escapeNewline)
+	bool WriteContent(const char* str)
 	{
-		return WriteContent(str, StringLength(str), escapeNewline);
+		return WriteContent(str, StringLength(str));
 	}
 };
 
@@ -273,7 +286,19 @@ void HandleGetRequest(const char* uri, int uriLength,
 		return;
 	}
 	memcpy(path, PUBLIC_DIR_PATH, PUBLIC_DIR_PATH_LENGTH);
-	memcpy(path + PUBLIC_DIR_PATH_LENGTH, uri, uriLength);
+	int offset = 0;
+	for (int i = 0; i < uriLength; i++) {
+		const char* c = uri + i;
+		if (i < uriLength - 3 && *c == '%' && *(c + 1) == '2' && *(c + 2) == '0') {
+			path[PUBLIC_DIR_PATH_LENGTH + offset] = ' ';
+			i += 2;
+		}
+		else {
+			path[PUBLIC_DIR_PATH_LENGTH + offset] = *c;
+		}
+		offset++;
+	}
+	// memcpy(path + PUBLIC_DIR_PATH_LENGTH, uri, uriLength);
 	path[pathLength] = '\0';
 
 	// Append index.html if necessary
@@ -346,29 +371,30 @@ void StartXML(void* data, const char* el, const char** attr)
 	ParseState* parseState = (ParseState*)data;
 
 	if (StringLength(el) == 4 && StringCompare(el, "root", 4)) {
-		parseState->WriteContent("{", false);
+		parseState->WriteContent("{");
 	}
 	else {
-		parseState->readingEntry = true;
 		parseState->firstEntryData = true;
 
 		if (parseState->firstEntry) {
 			parseState->firstEntry = false;
 		}
 		else {
-			parseState->WriteContent(",\n", false);
+			parseState->WriteContent(",\n");
 		}
 
-		parseState->WriteContent("\"", false);
-		parseState->WriteContent(el, StringLength(el), false);
+		parseState->WriteContent("\"");
+		parseState->WriteContent(el, StringLength(el));
 		if (StringLength(el) == 6 && StringCompare(el, "images", 6)) {
-			parseState->WriteContent("\": [", false);
-			parseState->WriteContent("\"", false); // TODO tmp
+			parseState->WriteContent("\": [");
+			parseState->WriteContent("\""); // TODO tmp
 			parseState->readingArray = true;
 		}
 		else {
-			parseState->WriteContent("\": \"", false);
+			parseState->WriteContent("\": \"");
 		}
+
+		parseState->readingEntry = true;
 	}
 }
 
@@ -377,7 +403,7 @@ void EndXML(void* data, const char* el)
 	ParseState* parseState = (ParseState*)data;
 
 	if (StringLength(el) == 4 && StringCompare(el, "root", 4)) {
-		parseState->WriteContent("}", false);
+		parseState->WriteContent("}");
 	}
 	else {
 		parseState->readingEntry = false;
@@ -393,12 +419,12 @@ void EndXML(void* data, const char* el)
 		parseState->bufferLength = last + 1;
 
 		if (StringLength(el) == 6 && StringCompare(el, "images", 6)) {
-			parseState->WriteContent("\"", false); // TODO tmp
-			parseState->WriteContent("]", false);
+			parseState->WriteContent("\""); // TODO tmp
+			parseState->WriteContent("]");
 			parseState->readingArray = false;
 		}
 		else {
-			parseState->WriteContent("\"", false);
+			parseState->WriteContent("\"");
 		}
 
 	}
@@ -419,7 +445,7 @@ void DataXML(void* data, const char* content, int length)
 		}
 	}
 
-	parseState->WriteContent(content + offset, length - offset, true);
+	parseState->WriteContent(content + offset, length - offset);
 }
 
 void HandlePostRequest(const char* uri, int uriLength,

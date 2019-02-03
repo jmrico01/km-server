@@ -4,13 +4,21 @@
 
 <author>
 j
-</author><date>
+</author>
+
+<date>
 JUN 13, 2016
-</date><title>
+</date>
+
+<title>
 Landing page animation
-</title><images>
+</title>
+
+<images>
 ../images/logs/Coding Log 3.png
-</images><content>
+</images>
+
+<content>
 Glitch art looks amazing, and so does film grain. A combination of both sounds perfect. This is what Luciano came up with for our logo in the new website's landing page. I really liked it. However, we soon realized it wasn't really perfect, for purely practical reasons. It was an mp4 file of about 50MB, and with more glitch transitions, it would be even larger (disclaimer: there were probably better codecs and/or export options, but I believe my technique ends up beating most video formats in file size, simply because it's tailored very specifically for our needs).
 
 The solution: I programmed what you could consider a very specific codec for our logo animation. It has two main features:

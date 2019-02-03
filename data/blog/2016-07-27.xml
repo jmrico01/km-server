@@ -4,13 +4,21 @@
 
 <author>
 j
-</author><date>
+</author>
+
+<date>
 JUL 27, 2016
-</date><title>
+</date>
+
+<title>
 Deferred Shading
-</title><images>
+</title>
+
+<images>
 ../images/logs/Coding Log 5.png
-</images><content>
+</images>
+
+<content>
 As we continue our effort to materialize the huge list of game ideas, it’s becoming clearer to me that the game’s lighting engine needs to be very robust, and that it must be able to handle multiple light sources efficiently. The traditional forward rendering pipeline isn't particularly great in this regard, as the environment is also prone to have multiple overlapped objects on screen, resulting in wasted per-fragment calculations.
 
 Given these observations, I've decided to implement a deferred shading pipeline. This pipeline works by rendering data from the scene into several textures, which are collectively called the **geometry buffer**, and deferring or delaying the actual lighting calculations until the end, when the geometry buffer is filled up. There are many resources available online that explain this subject in much greater detail. There are so many helpful tutorials out there in general; a big shoutout to anyone that writes them... I owe you at least 70% of my coding knowledge!
