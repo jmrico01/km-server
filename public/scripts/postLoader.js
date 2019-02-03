@@ -35,7 +35,7 @@ function InitGameLinks()
 
 function BuildPostHTML(metadata, content)
 {
-    var templateBase = '\
+    var TEMPLATE_POST = '\
         <div class="post"> \
             {AUTHOR} \
             <div class="entryOutline"> \
@@ -51,7 +51,7 @@ function BuildPostHTML(metadata, content)
             </div> \
         </div> \
     ';
-    var templateAuthor = '\
+    var TEMPLATE_AUTHOR = '\
         <div class="author"> \
             <div class="authorInfo"> \
                 <div class="graySpacer"></div> \
@@ -61,10 +61,10 @@ function BuildPostHTML(metadata, content)
             </div> \
         </div> \
     ';
-    var templateImage = '\
+    var TEMPLATE_IMAGE = '\
         <img class="entryImg" src="{IMG_SRC}"> \
     ';
-    var templateVideo = '\
+    var TEMPLATE_VIDEO = '\
         <div class="vidContainer"> \
             <iframe class="video" src="{VIDEO_SRC}" width="640" height="360" frameborder="0" webkitallowfullscreen mozallowfullscreen allowfullscreen></iframe> \
         </div> \
@@ -77,33 +77,29 @@ function BuildPostHTML(metadata, content)
     var mediaStr = "";
     if (metadata.hasOwnProperty("author")) {
         if (metadata.author === "j") {
-            authorStr = templateAuthor;
-            authorStr = authorStr.replace("{AUTHOR_IMG_SRC}", userImgJ);
+            authorStr = TEMPLATE_AUTHOR.replace("{AUTHOR_IMG_SRC}", userImgJ);
             authorStr = authorStr.replace("{DATE}", metadata.date);
         }
         else if (metadata.author === "l") {
-            authorStr = templateAuthor;
-            authorStr = authorStr.replace("{AUTHOR_IMG_SRC}", userImgL);
+            authorStr = TEMPLATE_AUTHOR.replace("{AUTHOR_IMG_SRC}", userImgL);
             authorStr = authorStr.replace("{DATE}", metadata.date);
+        }
+    }
+    if (metadata.hasOwnProperty("video")) {
+        if (metadata.video !== "") {
+            mediaStr += TEMPLATE_VIDEO.replace("{VIDEO_SRC}", metadata.video);
         }
     }
     if (metadata.hasOwnProperty("images")) {
         var imgs = metadata.images;
         if (imgs.length != 0) {
-            mediaStr = templateImage;
-            // TODO loop through all images
-            mediaStr = mediaStr.replace("{IMG_SRC}", metadata.images[0]);
-        }
-    }
-    if (metadata.hasOwnProperty("video")) {
-        if (metadata.video !== "") {
-            mediaStr = templateVideo;
-            // TODO loop through all images
-            mediaStr = mediaStr.replace("{VIDEO_SRC}", metadata.video);
+            for (var i = 0; i < imgs.length; i++) {
+                mediaStr += TEMPLATE_IMAGE.replace("{IMG_SRC}", metadata.images[i]);
+            }
         }
     }
 
-    var result = templateBase;
+    var result = TEMPLATE_POST;
     result = result.replace("{AUTHOR}", authorStr);
     result = result.replace("{MEDIA}", mediaStr);
     result = result.replace("{TITLE}", metadata.title);

@@ -62,6 +62,7 @@ struct ParseState
 	bool firstEntryData;
 	bool readingEntry;
 	bool readingArray;
+	bool readingArrayElement;
 
 	int bufferLength;
 	char buffer[BUFFER_LENGTH];
@@ -76,7 +77,7 @@ struct ParseState
 			// TODO fix newline expansion
 			int offset = 0;
 			for (int i = 0; i < n; i++) {
-				if (str[i] == '\n') {
+				if (str[i] == '\n' && (!readingArray || (readingArray && readingArrayElement))) {
 					buffer[bufferLength + offset] = '\\';
 					offset++;
 					buffer[bufferLength + offset] = 'n';
@@ -86,12 +87,17 @@ struct ParseState
 					offset++;
 					buffer[bufferLength + offset] = '"';
 				}
-				else if (readingArray && str[i] == ',') {
+				else if (readingArray && readingArrayElement && str[i] == ',') {
 					buffer[bufferLength + offset] = '"';
 					offset++;
 					buffer[bufferLength + offset] = ',';
-					offset++;
+					readingArrayElement = false;
+				}
+				else if (readingArray && !readingArrayElement && !IsWhitespace(str[i])) {
 					buffer[bufferLength + offset] = '"';
+					offset++;
+					buffer[bufferLength + offset] = str[i];
+					readingArrayElement = true;
 				}
 				else {
 					buffer[bufferLength + offset] = str[i];
@@ -387,8 +393,9 @@ void StartXML(void* data, const char* el, const char** attr)
 		parseState->WriteContent(el, StringLength(el));
 		if (StringLength(el) == 6 && StringCompare(el, "images", 6)) {
 			parseState->WriteContent("\": [");
-			parseState->WriteContent("\""); // TODO tmp
+			parseState->WriteContent("\"");
 			parseState->readingArray = true;
+			parseState->readingArrayElement = true;
 		}
 		else {
 			parseState->WriteContent("\": \"");
@@ -419,7 +426,7 @@ void EndXML(void* data, const char* el)
 		parseState->bufferLength = last + 1;
 
 		if (StringLength(el) == 6 && StringCompare(el, "images", 6)) {
-			parseState->WriteContent("\""); // TODO tmp
+			parseState->WriteContent("\"");
 			parseState->WriteContent("]");
 			parseState->readingArray = false;
 		}
@@ -498,11 +505,16 @@ void HandlePostRequest(const char* uri, int uriLength,
 
 	closedir(dir);
 
+	int dirFilePathsOrder[DATA_MAX_FILES_PER_DIR];
+	for (int i = 0; i < numFiles; i++) {
+		dirFilePathsOrder[i] = i;
+	}
+
 	WriteStatus(clientSocketFD, 200, "OK");
 	write(clientSocketFD, "[", 1);
 
 	for (int i = 0; i < numFiles; i++) {
-		const char* filePath = dirFilePaths[i];
+		const char* filePath = dirFilePaths[dirFilePathsOrder[i]];
 		int fileFD = open(filePath, O_RDONLY);
 		if (fileFD < 0) {
 			fprintf(stderr, "Error opening XML file %s\n", filePath);
@@ -567,6 +579,7 @@ int main(int argc, char* argv[])
 		return 1;
 	}
 	ServerMemory* memory = (ServerMemory*)allocatedMemory;
+	printf("Allocated %d bytes (%.03f MB) for server\n", allocatedMemorySize, (float)allocatedMemorySize / MEGABYTES(1));
 
 	int socketFD = socket(AF_INET, SOCK_STREAM, 0);
 	if (socketFD < 0) {
@@ -594,7 +607,7 @@ int main(int argc, char* argv[])
 		return 1;
 	}
 
-	printf("Server listening on port %d\n", PORT_HTTP);
+	printf("Listening on port %d\n", PORT_HTTP);
 
 	sockaddr_in clientAddr;
 	socklen_t clientAddrLen = sizeof(clientAddr);
