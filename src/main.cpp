@@ -304,8 +304,9 @@ void HandleGetRequest(const char* uri, int uriLength,
 		}
 		offset++;
 	}
+	path[PUBLIC_DIR_PATH_LENGTH + offset] = '\0';
 	// memcpy(path + PUBLIC_DIR_PATH_LENGTH, uri, uriLength);
-	path[pathLength] = '\0';
+	// path[pathLength] = '\0';
 
 	// Append index.html if necessary
 	if (path[pathLength - 1] != '/') {
@@ -511,7 +512,11 @@ void HandlePostRequest(const char* uri, int uriLength,
 	}
 
 	WriteStatus(clientSocketFD, 200, "OK");
-	write(clientSocketFD, "[", 1);
+	int writeRes;
+	writeRes = write(clientSocketFD, "[", 1);
+	if (writeRes < 0) {
+		// TODO something?
+	}
 
 	for (int i = 0; i < numFiles; i++) {
 		const char* filePath = dirFilePaths[dirFilePathsOrder[i]];
@@ -542,16 +547,22 @@ void HandlePostRequest(const char* uri, int uriLength,
 		// printf("%.*s\n", parseState->bufferLength, parseState->buffer);
 
 		if (i != 0) {
-			write(clientSocketFD, ",", 1);
+			writeRes = write(clientSocketFD, ",", 1);
+			if (writeRes < 0) {
+				// TODO something?
+			}
 		}
-		int res = write(clientSocketFD, parseState->buffer, parseState->bufferLength);
-		if (res < 0) {
+		writeRes = write(clientSocketFD, parseState->buffer, parseState->bufferLength);
+		if (writeRes < 0) {
 			fprintf(stderr, "Failed to write parsed file contents for %s\n", filePath);
 			continue;
 		}
 	}
 
-	write(clientSocketFD, "]", 1);
+	writeRes = write(clientSocketFD, "]", 1);
+	if (writeRes < 0) {
+		// TODO something?
+	}
 }
 
 int main(int argc, char* argv[])

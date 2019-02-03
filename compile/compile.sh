@@ -3,10 +3,10 @@ mkdir -p ./build
 APP_NAME="km_server"
 
 CPPFLAGS="-m64 -std=c++11 -fno-rtti -fno-exceptions -Werror -Wall"
-INCLUDEDIRS="-I../libs/expat2.2.6/include/"
+INCLUDEDIRS="-I../libs/include/"
 
 LINKFLAGS="-fvisibility=hidden"
-LIBDIRS="-L../libs/expat2.2.6/lib/"
+LIBDIRS="-L../libs/lib/"
 LIBS="-lexpat"
 
 if [ "$1" = "debug" ]; then
