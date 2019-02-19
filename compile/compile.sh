@@ -7,7 +7,7 @@ INCLUDEDIRS="-I../libs/include/"
 
 LINKFLAGS="-fvisibility=hidden"
 LIBDIRS="-L../libs/lib/"
-LIBS="-lexpat"
+LIBS="-lssl -lcrypto -lpthread -ldl -lexpat"
 
 if [ "$1" = "debug" ]; then
     CPPFLAGS+=" -ggdb3"

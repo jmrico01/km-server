@@ -13,6 +13,8 @@
 #include <netinet/in.h>
 
 #include <expat.h>
+#include <openssl/ssl.h>
+#include <openssl/err.h>
 
 #define KILOBYTES(b) (b * 1024)
 #define MEGABYTES(b) (KILOBYTES(b) * 1024)
@@ -592,6 +594,10 @@ int main(int argc, char* argv[])
 	ServerMemory* memory = (ServerMemory*)allocatedMemory;
 	printf("Allocated %d bytes (%.03f MB) for server\n", allocatedMemorySize, (float)allocatedMemorySize / MEGABYTES(1));
 
+    SSL_load_error_strings();
+    SSL_library_init();
+    OpenSSL_add_all_algorithms();
+
 	int socketFD = socket(AF_INET, SOCK_STREAM, 0);
 	if (socketFD < 0) {
 		fprintf(stderr, "Failed to open socket\n");
@@ -632,6 +638,43 @@ int main(int argc, char* argv[])
 
 		PrintSeparator();
 		printf("Received client connection\n");
+
+		SSL_CTX* sslCtx = SSL_CTX_new(SSLv23_server_method());
+		SSL_CTX_set_options(sslCtx, SSL_OP_SINGLE_DH_USE);
+
+		int use_cert = SSL_CTX_use_certificate_file(sslCtx, "./keys/km_server.crt",
+			SSL_FILETYPE_PEM);
+		int use_prv = SSL_CTX_use_PrivateKey_file(sslCtx, "./keys/km_server.key",
+			SSL_FILETYPE_PEM);
+		if (use_cert != 1 || use_prv != 1) {
+			// bleh
+			printf("bad use\n");
+			continue;
+		}
+
+		SSL* cSSL = SSL_new(sslCtx);
+		SSL_set_fd(cSSL, clientSocketFD);
+
+		int ssl_err = SSL_accept(cSSL);
+		if (ssl_err <= 0) {
+			// bleh
+			printf("accept error\n");
+			ERR_print_errors_fp(stderr);
+			continue;
+		}
+
+		int n = SSL_read(cSSL, memory->buffer, BUFFER_LENGTH);
+		if (n < 0) {
+			// bleh
+			printf("no read\n");
+			continue;
+		}
+		printf("SSL read (length %d): %.*s\n", n, n, memory->buffer);
+
+		SSL_shutdown(cSSL);
+		SSL_free(cSSL);
+
+		continue;
 
 		HTTPRequestMethod method;
 		const char* uri;
