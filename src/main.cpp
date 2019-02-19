@@ -1,16 +1,17 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <netinet/in.h>
+#include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <netinet/in.h>
+#include <unistd.h>
 
 #include <expat.h>
 #include <openssl/ssl.h>
@@ -31,6 +32,11 @@
 #define URI_PATH_MAX_LENGTH 64
 
 #define DATA_MAX_FILES_PER_DIR 1024
+
+bool done_ = false;
+
+typedef ssize_t (*ReadFunc)(int fd, void* buf, size_t count);
+typedef ssize_t (*WriteFunc)(int fd, const void* buf, size_t count);
 
 inline bool IsWhitespace(char c)
 {
@@ -122,11 +128,18 @@ struct ParseState
 	}
 };
 
-struct ServerMemory
+struct HTTPState
 {
+	int serverSocket;
 	char buffer[BUFFER_LENGTH];
 	char dirFilePaths[DATA_MAX_FILES_PER_DIR][URI_PATH_MAX_LENGTH];
 	ParseState parseState;
+};
+
+struct ServerMemory
+{
+	HTTPState httpState;
+	HTTPState httpsState;
 };
 
 enum HTTPRequestMethod
@@ -145,8 +158,6 @@ enum HTTPVersion
 	HTTP_VERSION_NONE
 };
 
-bool done_ = false;
-
 void SignalHandler(int s)
 {
 	printf("Caught signal %d\n", s);
@@ -160,7 +171,7 @@ void PrintSeparator()
 }
 
 // Returns length of parsed HTTP request into buffer, or -1 on error
-int ParseRequest(int clientSocketFD, char* buffer, int bufferLength,
+int ParseRequest(int clientSocketFD, char* buffer, int bufferLength, ReadFunc readFunc,
 	HTTPRequestMethod& outMethod,
 	const char** outURI, int& outURILength,
 	HTTPVersion& outVersion)
@@ -168,7 +179,7 @@ int ParseRequest(int clientSocketFD, char* buffer, int bufferLength,
 	// Read and parse request according to HTTP/1.1 standard
 	// Source: https://www.w3.org/Protocols/rfc2616/rfc2616-sec5.html
 
-	int n = read(clientSocketFD, buffer, bufferLength);
+	int n = readFunc(clientSocketFD, buffer, bufferLength);
 	if (n < 0) {
 		fprintf(stderr, "Failed to read from client socket\n");
 		return -1;
@@ -236,7 +247,7 @@ int ParseRequest(int clientSocketFD, char* buffer, int bufferLength,
 	return n;
 }
 
-void WriteStatus(int clientSocketFD, int statusCode, const char* statusMsg)
+void WriteStatus(int clientSocketFD, int statusCode, const char* statusMsg, WriteFunc writeFunc)
 {
 	const char* STATUS_TEMPLATE = "HTTP/1.1 %d %s\r\n";
 	char statusLine[HTTP_STATUS_LINE_MAX_LENGTH];
@@ -246,12 +257,12 @@ void WriteStatus(int clientSocketFD, int statusCode, const char* statusMsg)
 		return;
 	}
 
-	n = write(clientSocketFD, statusLine, StringLength(statusLine));
+	n = writeFunc(clientSocketFD, statusLine, StringLength(statusLine));
 	if (n < 0) {
 		fprintf(stderr, "Failed to write status: code %d, msg %s\n", statusCode, statusMsg);
 		return;
 	}
-	n = write(clientSocketFD, "\r\n", 2);
+	n = writeFunc(clientSocketFD, "\r\n", 2);
 	if (n < 0) {
 		fprintf(stderr, "Failed to CRLF for status: code %d, msg %s\n", statusCode, statusMsg);
 	}
@@ -276,11 +287,11 @@ bool ValidateGetURI(const char* uri, int uriLength)
 }
 
 void HandleGetRequest(const char* uri, int uriLength,
-	char* buffer, int bufferLength, int clientSocketFD)
+	char* buffer, int bufferLength, int clientSocketFD, WriteFunc writeFunc)
 {
 	if (!ValidateGetURI(uri, uriLength)) {
 		printf("URI failed validation: %.*s\n", uriLength, uri);
-		WriteStatus(clientSocketFD, 400, "Bad Request");
+		WriteStatus(clientSocketFD, 400, "Bad Request", writeFunc);
 		return;
 	}
 
@@ -290,7 +301,7 @@ void HandleGetRequest(const char* uri, int uriLength,
 	int pathLength = PUBLIC_DIR_PATH_LENGTH + uriLength;
 	if (pathLength >= URI_PATH_MAX_LENGTH) {
 		fprintf(stderr, "URI full path too long: %.*s\n", uriLength, uri);
-		WriteStatus(clientSocketFD, 400, "Bad Request");
+		WriteStatus(clientSocketFD, 400, "Bad Request", writeFunc);
 		return;
 	}
 	memcpy(path, PUBLIC_DIR_PATH, PUBLIC_DIR_PATH_LENGTH);
@@ -323,7 +334,7 @@ void HandleGetRequest(const char* uri, int uriLength,
 		if (last != pathLength - 1 && !dotBeforeSlash) {
 			if (pathLength + 1 >= URI_PATH_MAX_LENGTH) {
 				printf("URI + slash too long: %.*s\n", uriLength, uri);
-				WriteStatus(clientSocketFD, 400, "Bad Request");
+				WriteStatus(clientSocketFD, 400, "Bad Request", writeFunc);
 				return;
 			}
 			path[pathLength++] = '/';
@@ -334,7 +345,7 @@ void HandleGetRequest(const char* uri, int uriLength,
 		int indexFileLength = StringLength(indexFile);
 		if (pathLength + indexFileLength >= URI_PATH_MAX_LENGTH) {
 			printf("URI + index.html too long: %.*s\n", uriLength, uri);
-			WriteStatus(clientSocketFD, 400, "Bad Request");
+			WriteStatus(clientSocketFD, 400, "Bad Request", writeFunc);
 			return;
 		}
 		for (int i = 0; i < indexFileLength; i++) {
@@ -347,11 +358,11 @@ void HandleGetRequest(const char* uri, int uriLength,
 	int fileFD = open(path, O_RDONLY);
 	if (fileFD < 0) {
 		printf("Failed to open file %s\n", path);
-		WriteStatus(clientSocketFD, 404, "Not Found");
+		WriteStatus(clientSocketFD, 404, "Not Found", writeFunc);
 		return;
 	}
 
-	WriteStatus(clientSocketFD, 200, "OK");
+	WriteStatus(clientSocketFD, 200, "OK", writeFunc);
 
 	while (true) {
 		int n = read(fileFD, buffer, bufferLength);
@@ -365,7 +376,7 @@ void HandleGetRequest(const char* uri, int uriLength,
 			break;
 		}
 
-		int res = write(clientSocketFD, buffer, n);
+		int res = writeFunc(clientSocketFD, buffer, n);
 		if (res < 0) {
 			fprintf(stderr, "Failed to write file contents\n");
 			return;
@@ -461,7 +472,7 @@ void DataXML(void* data, const char* content, int length)
 void HandlePostRequest(const char* uri, int uriLength,
 	char* buffer, int bufferLength,
 	char dirFilePaths[DATA_MAX_FILES_PER_DIR][URI_PATH_MAX_LENGTH],
-	ParseState* parseState, int clientSocketFD)
+	ParseState* parseState, int clientSocketFD, WriteFunc writeFunc)
 {
 	const char* DATA_DIR_PATH = "./data";
 	const int DATA_DIR_PATH_LENGTH = StringLength(DATA_DIR_PATH);
@@ -470,7 +481,7 @@ void HandlePostRequest(const char* uri, int uriLength,
 	int fullDirPathLength = DATA_DIR_PATH_LENGTH + uriLength;
 	if (DATA_DIR_PATH_LENGTH + uriLength >= URI_PATH_MAX_LENGTH) {
 		fprintf(stderr, "Full dir path too long, URI %.*s\n", uriLength, uri);
-		WriteStatus(clientSocketFD, 400, "Bad Request");
+		WriteStatus(clientSocketFD, 400, "Bad Request", writeFunc);
 		return;
 	}
 	memcpy(fullDirPath, DATA_DIR_PATH, DATA_DIR_PATH_LENGTH);
@@ -483,7 +494,7 @@ void HandlePostRequest(const char* uri, int uriLength,
 	DIR* dir = opendir(fullDirPath);
 	if (dir == NULL) {
 		fprintf(stderr, "Failed to open data dir\n");
-		WriteStatus(clientSocketFD, 400, "Bad Request");
+		WriteStatus(clientSocketFD, 400, "Bad Request", writeFunc);
 		return;
 	}
 
@@ -513,9 +524,9 @@ void HandlePostRequest(const char* uri, int uriLength,
 		dirFilePathsOrder[i] = i;
 	}
 
-	WriteStatus(clientSocketFD, 200, "OK");
+	WriteStatus(clientSocketFD, 200, "OK", writeFunc);
 	int writeRes;
-	writeRes = write(clientSocketFD, "[", 1);
+	writeRes = writeFunc(clientSocketFD, "[", 1);
 	if (writeRes < 0) {
 		// TODO something?
 	}
@@ -549,22 +560,148 @@ void HandlePostRequest(const char* uri, int uriLength,
 		// printf("%.*s\n", parseState->bufferLength, parseState->buffer);
 
 		if (i != 0) {
-			writeRes = write(clientSocketFD, ",", 1);
+			writeRes = writeFunc(clientSocketFD, ",", 1);
 			if (writeRes < 0) {
 				// TODO something?
 			}
 		}
-		writeRes = write(clientSocketFD, parseState->buffer, parseState->bufferLength);
+		writeRes = writeFunc(clientSocketFD, parseState->buffer, parseState->bufferLength);
 		if (writeRes < 0) {
 			fprintf(stderr, "Failed to write parsed file contents for %s\n", filePath);
 			continue;
 		}
 	}
 
-	writeRes = write(clientSocketFD, "]", 1);
+	writeRes = writeFunc(clientSocketFD, "]", 1);
 	if (writeRes < 0) {
 		// TODO something?
 	}
+}
+
+bool HandleHTTPRequest(int clientSocketFD, HTTPState* httpState,
+	ReadFunc readFunc, WriteFunc writeFunc)
+{
+	HTTPRequestMethod method;
+	const char* uri;
+	int uriLength;
+	HTTPVersion version;
+	int requestLength = ParseRequest(clientSocketFD, httpState->buffer, BUFFER_LENGTH, readFunc,
+		method, &uri, uriLength, version);
+	if (requestLength < 0) {
+		close(clientSocketFD);
+		return false;
+	}
+
+	printf("HTTP version %d request, method %d, URI: %.*s\n",
+		version, method, uriLength, uri);
+	
+	switch (method) {
+		case HTTP_REQUEST_GET: {
+			HandleGetRequest(uri, uriLength,
+				httpState->buffer, BUFFER_LENGTH, clientSocketFD, writeFunc);
+		} break;
+		case HTTP_REQUEST_POST: {
+			printf("=== (POST) ===\n");
+			printf("%.*s\n", requestLength, httpState->buffer);
+			HandlePostRequest(uri, uriLength,
+				httpState->buffer, BUFFER_LENGTH,
+				httpState->dirFilePaths, &httpState->parseState, clientSocketFD, writeFunc);
+		} break;
+		default: {
+			fprintf(stderr, "Unhandled HTTP request method\n");
+			return false;
+		} break;
+	}
+
+	return true;
+}
+
+bool OpenSocket(int port, int* outSocketFD)
+{
+	int socketFD = socket(AF_INET, SOCK_STREAM, 0);
+	if (socketFD < 0) {
+		fprintf(stderr, "Failed to open socket\n");
+		return false;
+	}
+
+	sockaddr_in serverAddr;
+	serverAddr.sin_family = AF_INET;
+	serverAddr.sin_addr.s_addr = INADDR_ANY;
+	serverAddr.sin_port = htons(port);
+
+	if (bind(socketFD, (sockaddr*)&serverAddr, sizeof(serverAddr)) < 0) {
+		fprintf(stderr, "Failed to bind server addr with port %d to socket\n", port);
+		close(socketFD);
+		return false;
+	}
+
+	if (listen(socketFD, LISTEN_BACKLOG_SIZE) < 0) {
+		fprintf(stderr, "Failed to listen to socket on port %d\n", port);
+		close(socketFD);
+		return false;
+	}
+
+	printf("Listening on port %d\n", port);
+
+	*outSocketFD = socketFD;
+	return true;
+}
+
+void* HttpsServer(void* data)
+{
+	HTTPState* httpState = (HTTPState*)data;
+
+	sockaddr_in clientAddr;
+	socklen_t clientAddrLen = sizeof(clientAddr);
+
+	while (!done_) {
+		// Process HTTPS
+		int clientSocketFD = accept(httpState->serverSocket,
+			(sockaddr*)&clientAddr, &clientAddrLen);
+		if (clientSocketFD < 0) {
+			fprintf(stderr, "Failed to accept client connection\n");
+			continue;
+		}
+
+		PrintSeparator();
+		printf("Received HTTPS client connection\n");
+
+		SSL_CTX* sslCtx = SSL_CTX_new(SSLv23_server_method());
+		SSL_CTX_set_options(sslCtx, SSL_OP_SINGLE_DH_USE);
+
+		int use_cert = SSL_CTX_use_certificate_file(sslCtx, "./keys/km_server.crt",
+			SSL_FILETYPE_PEM);
+		int use_prv = SSL_CTX_use_PrivateKey_file(sslCtx, "./keys/km_server.key",
+			SSL_FILETYPE_PEM);
+		if (use_cert != 1 || use_prv != 1) {
+			// bleh
+			printf("bad use\n");
+			continue;
+		}
+
+		SSL* cSSL = SSL_new(sslCtx);
+		SSL_set_fd(cSSL, clientSocketFD);
+
+		int ssl_err = SSL_accept(cSSL);
+		if (ssl_err <= 0) {
+			// bleh
+			printf("accept error\n");
+			ERR_print_errors_fp(stderr);
+			continue;
+		}
+
+		if (!HandleHTTPRequest(clientSocketFD, httpState, SSL_read, SSL_write)) {
+			// bleh
+		}
+
+		SSL_shutdown(cSSL);
+		SSL_free(cSSL);
+
+		close(clientSocketFD);
+		printf("Closed connection with client\n");
+	}
+
+	return nullptr;
 }
 
 int main(int argc, char* argv[])
@@ -598,122 +735,49 @@ int main(int argc, char* argv[])
     SSL_library_init();
     OpenSSL_add_all_algorithms();
 
-	int socketFD = socket(AF_INET, SOCK_STREAM, 0);
-	if (socketFD < 0) {
-		fprintf(stderr, "Failed to open socket\n");
+	int socketHttp;
+	if (!OpenSocket(PORT_HTTP, &socketHttp)) {
 		munmap(allocatedMemory, allocatedMemorySize);
 		return 1;
 	}
 
-	sockaddr_in serverAddr = {};
-	serverAddr.sin_family = AF_INET;
-	serverAddr.sin_addr.s_addr = INADDR_ANY;
-	serverAddr.sin_port = htons(PORT_HTTP);
-
-	if (bind(socketFD, (sockaddr*)&serverAddr, sizeof(serverAddr)) < 0) {
-		fprintf(stderr, "Failed to bind server addr with port %d to socket\n", PORT_HTTP);
-		close(socketFD);
+	int socketHttps;
+	if (!OpenSocket(PORT_HTTPS, &socketHttps)) {
+		close(socketHttp);
 		munmap(allocatedMemory, allocatedMemorySize);
 		return 1;
 	}
+	memory->httpsState.serverSocket = socketHttps;
 
-	if (listen(socketFD, LISTEN_BACKLOG_SIZE) < 0) {
-		fprintf(stderr, "Failed to listen to socket on port %d\n", PORT_HTTP);
-		close(socketFD);
-	munmap(allocatedMemory, allocatedMemorySize);
-		return 1;
-	}
-
-	printf("Listening on port %d\n", PORT_HTTP);
+	pthread_t thread;
+	pthread_create(&thread, NULL, HttpsServer, (void*)&memory->httpsState);
 
 	sockaddr_in clientAddr;
 	socklen_t clientAddrLen = sizeof(clientAddr);
 
 	while (!done_) {
-		int clientSocketFD = accept(socketFD, (sockaddr*)&clientAddr, &clientAddrLen);
+		// Process HTTP
+		int clientSocketFD = accept(socketHttp, (sockaddr*)&clientAddr, &clientAddrLen);
 		if (clientSocketFD < 0) {
 			fprintf(stderr, "Failed to accept client connection\n");
 			continue;
 		}
 
 		PrintSeparator();
-		printf("Received client connection\n");
+		printf("Received HTTP client connection\n");
 
-		SSL_CTX* sslCtx = SSL_CTX_new(SSLv23_server_method());
-		SSL_CTX_set_options(sslCtx, SSL_OP_SINGLE_DH_USE);
-
-		int use_cert = SSL_CTX_use_certificate_file(sslCtx, "./keys/km_server.crt",
-			SSL_FILETYPE_PEM);
-		int use_prv = SSL_CTX_use_PrivateKey_file(sslCtx, "./keys/km_server.key",
-			SSL_FILETYPE_PEM);
-		if (use_cert != 1 || use_prv != 1) {
+		if (!HandleHTTPRequest(clientSocketFD, &memory->httpState, read, write)) {
 			// bleh
-			printf("bad use\n");
-			continue;
-		}
-
-		SSL* cSSL = SSL_new(sslCtx);
-		SSL_set_fd(cSSL, clientSocketFD);
-
-		int ssl_err = SSL_accept(cSSL);
-		if (ssl_err <= 0) {
-			// bleh
-			printf("accept error\n");
-			ERR_print_errors_fp(stderr);
-			continue;
-		}
-
-		int n = SSL_read(cSSL, memory->buffer, BUFFER_LENGTH);
-		if (n < 0) {
-			// bleh
-			printf("no read\n");
-			continue;
-		}
-		printf("SSL read (length %d): %.*s\n", n, n, memory->buffer);
-
-		SSL_shutdown(cSSL);
-		SSL_free(cSSL);
-
-		continue;
-
-		HTTPRequestMethod method;
-		const char* uri;
-		int uriLength;
-		HTTPVersion version;
-		int requestLength = ParseRequest(clientSocketFD, memory->buffer, BUFFER_LENGTH,
-			method, &uri, uriLength, version);
-		if (requestLength < 0) {
-			close(clientSocketFD);
-			continue;
-		}
-
-		printf("HTTP version %d request, method %d, URI: %.*s\n",
-			version, method, uriLength, uri);
-		
-		switch (method) {
-			case HTTP_REQUEST_GET: {
-				HandleGetRequest(uri, uriLength,
-					memory->buffer, BUFFER_LENGTH, clientSocketFD);
-			} break;
-			case HTTP_REQUEST_POST: {
-				printf("=== (POST) ===\n");
-				printf("%.*s\n", requestLength, memory->buffer);
-				HandlePostRequest(uri, uriLength,
-					memory->buffer, BUFFER_LENGTH,
-					memory->dirFilePaths, &memory->parseState, clientSocketFD);
-			}
-			default: {
-				fprintf(stderr, "Unhandled HTTP request method\n");
-			} break;
 		}
 
 		close(clientSocketFD);
 		printf("Closed connection with client\n");
 	}
 
-	close(socketFD);
+	close(socketHttp);
+	close(socketHttps);
 	munmap(allocatedMemory, allocatedMemorySize);
-	printf("Stopped server on port %d\n", PORT_HTTP);
+	printf("Stopped server on ports %d and %d\n", PORT_HTTP, PORT_HTTPS);
 
 	return 0;
 }
