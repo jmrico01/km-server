@@ -135,6 +135,53 @@ struct HTTPState
 	int outBufferN;
 	char outBuffer[BUFFER_LENGTH];
 
+	bool isHttps;
+	int socketFD;
+	SSL* ssl;
+
+	bool Flush()
+	{
+		printf("Flushing %d bytes\n", outBufferN);
+
+		if (outBufferN == 0) {
+			return true;
+		}
+
+		int n = 0;
+		while (n < outBufferN) {
+			int written;
+			if (isHttps) {
+				written = SSL_write(ssl, outBuffer + n, outBufferN - n);
+			}
+			else {
+				printf("write\n");
+				written = write(socketFD, outBuffer + n, outBufferN - n);
+				printf("writeDone, written %d\n", written);
+			}
+
+			if (written < 0) {
+				fprintf(stderr, "Flush error, errno %d\n", errno);
+				return false;
+			}
+			if (written == 0) {
+				break;
+			}
+
+			n += written;
+		}
+
+		if (n != outBufferN) {
+			fprintf(stderr, "Incorrect number of bytes flushed (%d, expected %d)\n",
+				n, outBufferN);
+			return false;
+		}
+
+		printf("Flushed\n");
+
+		outBufferN = 0;
+		return true;
+	}
+
 	bool WriteStatus(int statusCode, const char* statusMsg)
 	{
 		if (outBufferN != 0) {
@@ -156,15 +203,46 @@ struct HTTPState
 
 	bool WriteOut(const char* data, int n)
 	{
-		if (outBufferN + n > BUFFER_LENGTH) {
-			return false;
+		printf("WriteOut, %d bytes\n", n);
+		if (n == 0) {
+			return true;
 		}
 
-		memcpy(outBuffer + outBufferN, data, n);
-		outBufferN += n;
+		if (outBufferN + n > BUFFER_LENGTH) {
+			int n1 = BUFFER_LENGTH - outBufferN;
+			if (!WriteOut(data, n1)) {
+				fprintf(stderr, "Large write #1 failed\n");
+				return false;
+			}
+
+			if (!Flush()) {
+				fprintf(stderr, "Large write flush failed\n");
+				return false;
+			}
+
+			int n2 = n - n1;
+			if (!WriteOut(data + n1, n2)) {
+				fprintf(stderr, "Large write #2 failed\n");
+				return false;
+			}
+		}
+		else {
+			memcpy(outBuffer + outBufferN, data, n);
+			outBufferN += n;
+		}
 
 		return true;
 	}
+
+	/*bool WriteOut(int sourceFD, int n)
+	{
+		if (n == 0) {
+			return true;
+		}
+
+		if (outBufferN + n > BUFFER_LENGTH) {
+		}
+	}*/
 };
 
 struct ServerMemory
@@ -266,29 +344,6 @@ bool ParseHTTPRequest(const char* request, int requestLength,
 	return true;
 }
 
-/*
-void WriteStatus(int clientSocketFD, int statusCode, const char* statusMsg, WriteFunc writeFunc)
-{
-	const char* STATUS_TEMPLATE = "HTTP/1.1 %d %s\r\n";
-	char statusLine[HTTP_STATUS_LINE_MAX_LENGTH];
-	int n = snprintf(statusLine, HTTP_STATUS_LINE_MAX_LENGTH, STATUS_TEMPLATE, statusCode, statusMsg);
-	if (n < 0 || n >= HTTP_STATUS_LINE_MAX_LENGTH) {
-		fprintf(stderr, "HTTP status line too long: code %d, msg %s\n", statusCode, statusMsg);
-		return;
-	}
-
-	n = writeFunc(clientSocketFD, statusLine, StringLength(statusLine));
-	if (n < 0) {
-		fprintf(stderr, "Failed to write status: code %d, msg %s\n", statusCode, statusMsg);
-		return;
-	}
-	n = writeFunc(clientSocketFD, "\r\n", 2);
-	if (n < 0) {
-		fprintf(stderr, "Failed to CRLF for status: code %d, msg %s\n", statusCode, statusMsg);
-	}
-}
-*/
-
 bool ValidateGetURI(const char* uri, int uriLength)
 {
 	int consecutiveDots = 0;
@@ -307,12 +362,12 @@ bool ValidateGetURI(const char* uri, int uriLength)
 	return true;
 }
 
-void HandleGetRequest(const char* uri, int uriLength, HTTPState* httpState)
+bool HandleGetRequest(const char* uri, int uriLength, HTTPState* httpState)
 {
 	if (!ValidateGetURI(uri, uriLength)) {
 		fprintf(stderr, "URI failed validation: %.*s\n", uriLength, uri);
 		httpState->WriteStatus(400, "Bad Request");
-		return;
+		return true;
 	}
 
 	const char* PUBLIC_DIR_PATH = "./public";
@@ -322,7 +377,7 @@ void HandleGetRequest(const char* uri, int uriLength, HTTPState* httpState)
 	if (pathLength >= URI_PATH_MAX_LENGTH) {
 		fprintf(stderr, "URI full path too long: %.*s\n", uriLength, uri);
 		httpState->WriteStatus(400, "Bad Request");
-		return;
+		return true;
 	}
 	memcpy(path, PUBLIC_DIR_PATH, PUBLIC_DIR_PATH_LENGTH);
 	int offset = 0;
@@ -355,7 +410,7 @@ void HandleGetRequest(const char* uri, int uriLength, HTTPState* httpState)
 			if (pathLength + 1 >= URI_PATH_MAX_LENGTH) {
 				fprintf(stderr, "URI + slash too long: %.*s\n", uriLength, uri);
 				httpState->WriteStatus(400, "Bad Request");
-				return;
+				return true;
 			}
 			path[pathLength++] = '/';
 		}
@@ -366,7 +421,7 @@ void HandleGetRequest(const char* uri, int uriLength, HTTPState* httpState)
 		if (pathLength + indexFileLength >= URI_PATH_MAX_LENGTH) {
 			fprintf(stderr, "URI + index.html too long: %.*s\n", uriLength, uri);
 			httpState->WriteStatus(400, "Bad Request");
-			return;
+			return true;
 		}
 		for (int i = 0; i < indexFileLength; i++) {
 			path[pathLength + i] = indexFile[i];
@@ -379,7 +434,7 @@ void HandleGetRequest(const char* uri, int uriLength, HTTPState* httpState)
 	if (fileFD < 0) {
 		printf("Failed to open file %s\n", path);
 		httpState->WriteStatus(404, "Not Found");
-		return;
+		return true;
 	}
 
 	httpState->WriteStatus(200, "OK");
@@ -389,7 +444,7 @@ void HandleGetRequest(const char* uri, int uriLength, HTTPState* httpState)
 		if (n < 0) {
 			fprintf(stderr, "Failed to read file %s\n", path);
 			close(fileFD);
-			return;
+			return false;
 		}
 		if (n == 0) {
 			break;
@@ -397,11 +452,13 @@ void HandleGetRequest(const char* uri, int uriLength, HTTPState* httpState)
 
 		if (!httpState->WriteOut(httpState->buffer, n)) {
 			fprintf(stderr, "Failed to write file %s to HTTP response\n", path);
-			return;
+			return false;
 		}
 	}
 
 	close(fileFD);
+
+	return true;
 }
 
 void StartXML(void* data, const char* el, const char** attr)
@@ -487,7 +544,7 @@ void DataXML(void* data, const char* content, int length)
 	parseState->WriteContent(content + offset, length - offset);
 }
 
-void HandlePostRequest(const char* uri, int uriLength, HTTPState* httpState)
+bool HandlePostRequest(const char* uri, int uriLength, HTTPState* httpState)
 {
 	const char* DATA_DIR_PATH = "./data";
 	const int DATA_DIR_PATH_LENGTH = StringLength(DATA_DIR_PATH);
@@ -497,7 +554,7 @@ void HandlePostRequest(const char* uri, int uriLength, HTTPState* httpState)
 	if (DATA_DIR_PATH_LENGTH + uriLength >= URI_PATH_MAX_LENGTH) {
 		fprintf(stderr, "Full dir path too long, URI %.*s\n", uriLength, uri);
 		httpState->WriteStatus(400, "Bad Request");
-		return;
+		return true;
 	}
 	memcpy(fullDirPath, DATA_DIR_PATH, DATA_DIR_PATH_LENGTH);
 	memcpy(fullDirPath + DATA_DIR_PATH_LENGTH, uri, uriLength);
@@ -510,7 +567,7 @@ void HandlePostRequest(const char* uri, int uriLength, HTTPState* httpState)
 	if (dir == NULL) {
 		fprintf(stderr, "Failed to open data dir\n");
 		httpState->WriteStatus(400, "Bad Request");
-		return;
+		return true;
 	}
 
 	int numFiles = 0;
@@ -539,7 +596,9 @@ void HandlePostRequest(const char* uri, int uriLength, HTTPState* httpState)
 		dirFilePathsOrder[i] = i;
 	}
 
-	httpState->WriteStatus(200, "OK");
+	if (!httpState->WriteStatus(200, "OK")) {
+		// TODO something?
+	}
 	if (!httpState->WriteOut("[", 1)) {
 		// TODO something?
 	}
@@ -587,6 +646,8 @@ void HandlePostRequest(const char* uri, int uriLength, HTTPState* httpState)
 	if (!httpState->WriteOut("]", 1)) {
 		// TODO something?
 	}
+
+	return true;
 }
 
 bool HandleHTTPRequest(HTTPState* httpState)
@@ -600,22 +661,32 @@ bool HandleHTTPRequest(HTTPState* httpState)
 		return false;
 	}
 
-	httpState->outBufferN = 0;
-
 	printf("HTTP version %d request, method %d, URI: %.*s\n",
 		version, method, uriLength, uri);
 	
+	httpState->outBufferN = 0;
+	bool success = false;
 	switch (method) {
 		case HTTP_REQUEST_GET: {
-			HandleGetRequest(uri, uriLength, httpState);
+			success = HandleGetRequest(uri, uriLength, httpState);
 		} break;
 		case HTTP_REQUEST_POST: {
-			HandlePostRequest(uri, uriLength, httpState);
+			success = HandlePostRequest(uri, uriLength, httpState);
 		} break;
 		default: {
 			fprintf(stderr, "Unhandled HTTP request method\n");
 			return false;
 		} break;
+	}
+
+	if (!success) {
+		fprintf(stderr, "Failed to handle HTTP request\n");
+		return false;
+	}
+
+	if (!httpState->Flush()) {
+		fprintf(stderr, "Final HTTP request flush failed\n");
+		return false;
 	}
 
 	return true;
@@ -658,6 +729,8 @@ void HttpServer(HTTPState* httpState)
 	if (!OpenSocket(PORT_HTTP, &socketFD)) {
 		return;
 	}
+	
+	httpState->isHttps = false;
 
 	sockaddr_in clientAddr;
 	socklen_t clientAddrLen = sizeof(clientAddr);
@@ -682,18 +755,9 @@ void HttpServer(HTTPState* httpState)
 		}
 
 		httpState->bufferN = n;
+		httpState->socketFD = clientSocketFD;
 		if (!HandleHTTPRequest(httpState)) {
 			// bleh
-		}
-
-		n = write(clientSocketFD, httpState->outBuffer, httpState->outBufferN);
-		if (n < 0) {
-			fprintf(stderr, "Failed to write response to client socket\n");
-			continue;
-		}
-		if (n != httpState->outBufferN) {
-			// TODO loop write
-			fprintf(stderr, "Failed to write full response to client socket\n");
 		}
 
 		close(clientSocketFD);
@@ -706,10 +770,16 @@ void HttpServer(HTTPState* httpState)
 
 void HttpsServer(HTTPState* httpState)
 {
+    SSL_load_error_strings();
+    SSL_library_init();
+    OpenSSL_add_all_algorithms();
+
 	int socketFD;
 	if (!OpenSocket(PORT_HTTPS, &socketFD)) {
 		return;
 	}
+
+	httpState->isHttps = true;
 
 	sockaddr_in clientAddr;
 	socklen_t clientAddrLen = sizeof(clientAddr);
@@ -727,28 +797,28 @@ void HttpsServer(HTTPState* httpState)
 		SSL_CTX* sslCtx = SSL_CTX_new(SSLv23_server_method());
 		SSL_CTX_set_options(sslCtx, SSL_OP_SINGLE_DH_USE);
 
-		int use_cert = SSL_CTX_use_certificate_file(sslCtx, "./keys/km-server.crt",
+		int useCert = SSL_CTX_use_certificate_file(sslCtx, "./keys/km-server.crt",
 			SSL_FILETYPE_PEM);
-		int use_prv = SSL_CTX_use_PrivateKey_file(sslCtx, "./keys/km-server.key",
+		int usePriv = SSL_CTX_use_PrivateKey_file(sslCtx, "./keys/km-server.key",
 			SSL_FILETYPE_PEM);
-		if (use_cert != 1 || use_prv != 1) {
+		if (useCert != 1 || usePriv != 1) {
 			// bleh
 			printf("bad use\n");
 			continue;
 		}
 
-		SSL* cSSL = SSL_new(sslCtx);
-		SSL_set_fd(cSSL, clientSocketFD);
+		SSL* ssl = SSL_new(sslCtx);
+		SSL_set_fd(ssl, clientSocketFD);
 
-		int ssl_err = SSL_accept(cSSL);
-		if (ssl_err <= 0) {
+		int sslError = SSL_accept(ssl);
+		if (sslError <= 0) {
 			// bleh
 			printf("accept error\n");
 			ERR_print_errors_fp(stderr);
 			continue;
 		}
 
-		int n = SSL_read(cSSL, httpState->buffer, BUFFER_LENGTH);
+		int n = SSL_read(ssl, httpState->buffer, BUFFER_LENGTH);
 		if (n < 0) {
 			fprintf(stderr, "Failed to read from client socket\n");
 			continue;
@@ -758,22 +828,13 @@ void HttpsServer(HTTPState* httpState)
 		}
 
 		httpState->bufferN = n;
+		httpState->ssl = ssl;
 		if (!HandleHTTPRequest(httpState)) {
 			// bleh
 		}
 
-		n = SSL_write(cSSL, httpState->outBuffer, httpState->outBufferN);
-		if (n < 0) {
-			fprintf(stderr, "Failed to write response to client socket\n");
-			continue;
-		}
-		if (n != httpState->outBufferN) {
-			// TODO loop write
-			fprintf(stderr, "Failed to write full response to client socket\n");
-		}
-
-		SSL_shutdown(cSSL);
-		SSL_free(cSSL);
+		SSL_shutdown(ssl);
+		SSL_free(ssl);
 
 		close(clientSocketFD);
 		printf("Closed HTTPS client connection\n");
@@ -816,16 +877,13 @@ int main(int argc, char* argv[])
 	ServerMemory* memory = (ServerMemory*)allocatedMemory;
 	printf("Allocated %d bytes (%.03f MB) for server\n", allocatedMemorySize, (float)allocatedMemorySize / MEGABYTES(1));
 
-    SSL_load_error_strings();
-    SSL_library_init();
-    OpenSSL_add_all_algorithms();
-
 	pthread_t thread;
 	pthread_create(&thread, NULL, ThreadStart, (void*)&memory->httpsState);
 
 	HttpServer(&memory->httpState);
 
-	// TODO check for thread shut down
+	pthread_join(thread, NULL);
+
 	munmap(allocatedMemory, allocatedMemorySize);
 	printf("Server shutting down\n");
 
