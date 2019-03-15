@@ -150,14 +150,14 @@ struct HTTPState
 		int n = 0;
 		while (n < outBufferN) {
 			int written;
+			printf("write\n");
 			if (isHttps) {
 				written = SSL_write(ssl, outBuffer + n, outBufferN - n);
 			}
 			else {
-				printf("write\n");
 				written = write(socketFD, outBuffer + n, outBufferN - n);
-				printf("writeDone, written %d\n", written);
 			}
+			printf("writeDone, written %d\n", written);
 
 			if (written < 0) {
 				fprintf(stderr, "Flush error, errno %d\n", errno);
@@ -189,7 +189,7 @@ struct HTTPState
 			return false;
 		}
 
-		const char* STATUS_TEMPLATE = "HTTP/1.1 %d %s\r\n";
+		const char* STATUS_TEMPLATE = "HTTP/1.1 %d %s\r\n\r\n";
 		int n = snprintf(outBuffer, BUFFER_LENGTH, STATUS_TEMPLATE, statusCode, statusMsg);
 		if (n < 0 || n >= HTTP_STATUS_LINE_MAX_LENGTH) {
 			fprintf(stderr, "HTTP status line too long: code %d, msg %s\n", statusCode, statusMsg);
@@ -233,16 +233,6 @@ struct HTTPState
 
 		return true;
 	}
-
-	/*bool WriteOut(int sourceFD, int n)
-	{
-		if (n == 0) {
-			return true;
-		}
-
-		if (outBufferN + n > BUFFER_LENGTH) {
-		}
-	}*/
 };
 
 struct ServerMemory
@@ -439,18 +429,20 @@ bool HandleGetRequest(const char* uri, int uriLength, HTTPState* httpState)
 
 	httpState->WriteStatus(200, "OK");
 
+	httpState->Flush();
+
 	while (true) {
-		int n = read(fileFD, httpState->buffer, BUFFER_LENGTH);
-		if (n < 0) {
+		httpState->outBufferN = read(fileFD, httpState->outBuffer, BUFFER_LENGTH);
+		if (httpState->outBufferN < 0) {
 			fprintf(stderr, "Failed to read file %s\n", path);
 			close(fileFD);
 			return false;
 		}
-		if (n == 0) {
+		if (httpState->outBufferN == 0) {
 			break;
 		}
 
-		if (!httpState->WriteOut(httpState->buffer, n)) {
+		if (!httpState->Flush()) {
 			fprintf(stderr, "Failed to write file %s to HTTP response\n", path);
 			return false;
 		}
@@ -844,7 +836,7 @@ void HttpsServer(HTTPState* httpState)
 	printf("Stopped HTTPS server on port %d\n", PORT_HTTPS);
 }
 
-void* ThreadStart(void* data)
+void* HttpsServerThread(void* data)
 {
 	HttpsServer((HTTPState*)data);
 	return nullptr;
@@ -878,7 +870,7 @@ int main(int argc, char* argv[])
 	printf("Allocated %d bytes (%.03f MB) for server\n", allocatedMemorySize, (float)allocatedMemorySize / MEGABYTES(1));
 
 	pthread_t thread;
-	pthread_create(&thread, NULL, ThreadStart, (void*)&memory->httpsState);
+	pthread_create(&thread, NULL, HttpsServerThread, (void*)&memory->httpsState);
 
 	HttpServer(&memory->httpState);
 
