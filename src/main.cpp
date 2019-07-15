@@ -857,7 +857,9 @@ int main(int argc, char* argv[])
 
 	sigaction(SIGINT, &sigIntHandler, NULL);
 
-	int allocatedMemorySize = sizeof(ServerMemory);
+	size_t pageSize = getpagesize();
+	size_t numPages = (sizeof(ServerMemory) / pageSize) + 1;
+	size_t allocatedMemorySize = numPages * pageSize;
 	void* allocatedMemory = mmap(NULL, allocatedMemorySize,
 		PROT_READ | PROT_WRITE,
 		MAP_PRIVATE | MAP_ANONYMOUS,
@@ -867,7 +869,8 @@ int main(int argc, char* argv[])
 		return 1;
 	}
 	ServerMemory* memory = (ServerMemory*)allocatedMemory;
-	printf("Allocated %d bytes (%.03f MB) for server\n", allocatedMemorySize, (float)allocatedMemorySize / MEGABYTES(1));
+	printf("Allocated %zu bytes (%.03f MB) for server\n", allocatedMemorySize,
+		(float)allocatedMemorySize / MEGABYTES(1));
 
 	pthread_t thread;
 	pthread_create(&thread, NULL, HttpsServerThread, (void*)&memory->httpsState);
