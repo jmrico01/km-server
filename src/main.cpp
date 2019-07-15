@@ -244,17 +244,13 @@ struct ServerMemory
 enum HTTPRequestMethod
 {
 	HTTP_REQUEST_GET,
-	HTTP_REQUEST_POST,
-
-	HTTP_REQUEST_NONE
+	HTTP_REQUEST_POST
 };
 
 enum HTTPVersion
 {
 	HTTP_VERSION_1_0,
-	HTTP_VERSION_1_1,
-
-	HTTP_VERSION_NONE
+	HTTP_VERSION_1_1
 };
 
 void SignalHandler(int s)
@@ -282,7 +278,6 @@ bool ParseHTTPRequest(const char* request, int requestLength,
 		firstSpace++;
 	}
 
-	*method = HTTP_REQUEST_NONE;
 	if (StringCompare(methodString, "GET", 3)) {
 		*method = HTTP_REQUEST_GET;
 	}
@@ -316,7 +311,6 @@ bool ParseHTTPRequest(const char* request, int requestLength,
 		lineEnd++;
 	}
 
-	*version = HTTP_VERSION_NONE;
 	if (StringCompare(versionString, "HTTP/1.0", 8)) {
 		*version = HTTP_VERSION_1_0;
 	}
@@ -872,12 +866,12 @@ int main(int argc, char* argv[])
 	printf("Allocated %zu bytes (%.03f MB) for server\n", allocatedMemorySize,
 		(float)allocatedMemorySize / MEGABYTES(1));
 
-	pthread_t thread;
-	pthread_create(&thread, NULL, HttpsServerThread, (void*)&memory->httpsState);
+	// pthread_t thread;
+	// pthread_create(&thread, NULL, HttpsServerThread, (void*)&memory->httpsState);
 
 	HttpServer(&memory->httpState);
 
-	pthread_join(thread, NULL);
+	// pthread_join(thread, NULL);
 
 	munmap(allocatedMemory, allocatedMemorySize);
 	printf("Server shutting down\n");
