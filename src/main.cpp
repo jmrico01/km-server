@@ -783,9 +783,9 @@ void HttpsServer(HTTPState* httpState)
 		SSL_CTX* sslCtx = SSL_CTX_new(SSLv23_server_method());
 		SSL_CTX_set_options(sslCtx, SSL_OP_SINGLE_DH_USE);
 
-		int useCert = SSL_CTX_use_certificate_file(sslCtx, "./keys/km-server.crt",
+		int useCert = SSL_CTX_use_certificate_file(sslCtx, "./keys/cert.pem",
 			SSL_FILETYPE_PEM);
-		int usePriv = SSL_CTX_use_PrivateKey_file(sslCtx, "./keys/km-server.key",
+		int usePriv = SSL_CTX_use_PrivateKey_file(sslCtx, "./keys/privkey.pem",
 			SSL_FILETYPE_PEM);
 		if (useCert != 1 || usePriv != 1) {
 			// bleh
