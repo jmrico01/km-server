@@ -866,12 +866,12 @@ int main(int argc, char* argv[])
 	printf("Allocated %zu bytes (%.03f MB) for server\n", allocatedMemorySize,
 		(float)allocatedMemorySize / MEGABYTES(1));
 
-	// pthread_t thread;
-	// pthread_create(&thread, NULL, HttpsServerThread, (void*)&memory->httpsState);
+	pthread_t thread;
+	pthread_create(&thread, NULL, HttpsServerThread, (void*)&memory->httpsState);
 
 	HttpServer(&memory->httpState);
 
-	// pthread_join(thread, NULL);
+	pthread_join(thread, NULL);
 
 	munmap(allocatedMemory, allocatedMemorySize);
 	printf("Server shutting down\n");
