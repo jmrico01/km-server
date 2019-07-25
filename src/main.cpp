@@ -50,7 +50,7 @@ int StringLength(const char* str)
 	return length;
 }
 
-bool StringCompare(const char* str1, const char* str2, int n)
+bool StringEqual(const char* str1, const char* str2, int n)
 {
 	for (int i = 0; i < n; i++) {
 		if (str1[i] != str2[i]) {
@@ -278,10 +278,10 @@ bool ParseHTTPRequest(const char* request, int requestLength,
 		firstSpace++;
 	}
 
-	if (StringCompare(methodString, "GET", 3)) {
+	if (StringEqual(methodString, "GET", 3)) {
 		*method = HTTP_REQUEST_GET;
 	}
-	else if (StringCompare(methodString, "POST", 4)) {
+	else if (StringEqual(methodString, "POST", 4)) {
 		*method = HTTP_REQUEST_POST;
 	}
 	else {
@@ -311,10 +311,10 @@ bool ParseHTTPRequest(const char* request, int requestLength,
 		lineEnd++;
 	}
 
-	if (StringCompare(versionString, "HTTP/1.0", 8)) {
+	if (StringEqual(versionString, "HTTP/1.0", 8)) {
 		*version = HTTP_VERSION_1_0;
 	}
-	else if (StringCompare(versionString, "HTTP/1.1", 8)) {
+	else if (StringEqual(versionString, "HTTP/1.1", 8)) {
 		*version = HTTP_VERSION_1_1;
 	}
 	else {
@@ -451,7 +451,7 @@ void StartXML(void* data, const char* el, const char** attr)
 {
 	ParseState* parseState = (ParseState*)data;
 
-	if (StringLength(el) == 4 && StringCompare(el, "root", 4)) {
+	if (StringLength(el) == 4 && StringEqual(el, "root", 4)) {
 		parseState->WriteContent("{");
 	}
 	else {
@@ -466,7 +466,7 @@ void StartXML(void* data, const char* el, const char** attr)
 
 		parseState->WriteContent("\"");
 		parseState->WriteContent(el, StringLength(el));
-		if (StringLength(el) == 6 && StringCompare(el, "images", 6)) {
+		if (StringLength(el) == 6 && StringEqual(el, "images", 6)) {
 			parseState->WriteContent("\": [");
 			parseState->WriteContent("\"");
 			parseState->readingArray = true;
@@ -484,7 +484,7 @@ void EndXML(void* data, const char* el)
 {
 	ParseState* parseState = (ParseState*)data;
 
-	if (StringLength(el) == 4 && StringCompare(el, "root", 4)) {
+	if (StringLength(el) == 4 && StringEqual(el, "root", 4)) {
 		parseState->WriteContent("}");
 	}
 	else {
@@ -500,7 +500,7 @@ void EndXML(void* data, const char* el)
 		}
 		parseState->bufferLength = last + 1;
 
-		if (StringLength(el) == 6 && StringCompare(el, "images", 6)) {
+		if (StringLength(el) == 6 && StringEqual(el, "images", 6)) {
 			parseState->WriteContent("\"");
 			parseState->WriteContent("]");
 			parseState->readingArray = false;
@@ -561,7 +561,7 @@ bool HandlePostRequest(const char* uri, int uriLength, HTTPState* httpState)
 	while ((dirEntry = readdir(dir)) != NULL) {
 		const char* name = dirEntry->d_name;
 		int nameLength = StringLength(name);
-		if (nameLength > 4 && StringCompare(name + nameLength - 4, ".xml", 4)) {
+		if (nameLength > 4 && StringEqual(name + nameLength - 4, ".xml", 4)) {
 			char* filePath = httpState->dirFilePaths[numFiles];
 			if (fullDirPathLength + nameLength >= URI_PATH_MAX_LENGTH) {
 				fprintf(stderr, "Path too long for XML file %s in dir %s\n", name, fullDirPath);
@@ -577,6 +577,7 @@ bool HandlePostRequest(const char* uri, int uriLength, HTTPState* httpState)
 
 	closedir(dir);
 
+	// URI_PATH_MAX_LENGTH
 	int dirFilePathsOrder[DATA_MAX_FILES_PER_DIR];
 	for (int i = 0; i < numFiles; i++) {
 		dirFilePathsOrder[i] = i;
@@ -843,12 +844,10 @@ int main(int argc, char* argv[])
 		return 1;
 	}
 
-	struct sigaction sigIntHandler;
-
+	sigaction sigIntHandler;
 	sigIntHandler.sa_handler = SignalHandler;
 	sigemptyset(&sigIntHandler.sa_mask);
 	sigIntHandler.sa_flags = 0;
-
 	sigaction(SIGINT, &sigIntHandler, NULL);
 
 	size_t pageSize = getpagesize();
