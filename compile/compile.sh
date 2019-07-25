@@ -3,7 +3,8 @@ mkdir -p ./build
 APP_NAME="km_server"
 
 CPPFLAGS="-m64 -std=c++11 -fno-rtti -fno-exceptions -Werror -Wall"
-INCLUDEDIRS="-I../libs/include/"
+DEFINES="-DGAME_SLOW=0 -DGAME_INTERNAL=0"
+INCLUDEDIRS="-I../libs/include/ -I./km_common"
 
 LINKFLAGS="-fvisibility=hidden"
 LIBDIRS="-L../libs/lib/"
@@ -18,7 +19,7 @@ elif [ "$1" = "" ]; then
     exit
 fi
 
-gcc $CPPFLAGS $INCLUDEDIRS \
+g++ $DEFINES $CPPFLAGS $INCLUDEDIRS \
     ./src/main.cpp \
     -o ./build/$APP_NAME \
     $LINKFLAGS $LIBDIRS $LIBS

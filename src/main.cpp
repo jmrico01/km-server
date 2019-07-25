@@ -17,8 +17,9 @@
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 
-#define KILOBYTES(b) (b * 1024)
-#define MEGABYTES(b) (KILOBYTES(b) * 1024)
+#include <km_defines.h>
+#include <km_log.h>
+#include <km_string.h>
 
 #define PORT_HTTP 8080
 #define PORT_HTTPS 8181
@@ -34,32 +35,6 @@
 #define DATA_MAX_FILES_PER_DIR 1024
 
 bool done_ = false;
-
-inline bool IsWhitespace(char c)
-{
-	return c == ' ' || c == '\t' || c == '\n' || c == '\v' || c == '\f' || c == '\r';
-}
-
-int StringLength(const char* str)
-{
-	int length = 0;
-	while (str[length] != '\0') {
-		length++;
-	}
-
-	return length;
-}
-
-bool StringEqual(const char* str1, const char* str2, int n)
-{
-	for (int i = 0; i < n; i++) {
-		if (str1[i] != str2[i]) {
-			return false;
-		}
-	}
-
-	return true;
-}
 
 struct ParseState
 {
@@ -239,6 +214,7 @@ struct ServerMemory
 {
 	HTTPState httpState;
 	HTTPState httpsState;
+	LogState logState;
 };
 
 enum HTTPRequestMethod
@@ -278,10 +254,10 @@ bool ParseHTTPRequest(const char* request, int requestLength,
 		firstSpace++;
 	}
 
-	if (StringEqual(methodString, "GET", 3)) {
+	if (StringCompare(methodString, "GET", 3)) {
 		*method = HTTP_REQUEST_GET;
 	}
-	else if (StringEqual(methodString, "POST", 4)) {
+	else if (StringCompare(methodString, "POST", 4)) {
 		*method = HTTP_REQUEST_POST;
 	}
 	else {
@@ -311,10 +287,10 @@ bool ParseHTTPRequest(const char* request, int requestLength,
 		lineEnd++;
 	}
 
-	if (StringEqual(versionString, "HTTP/1.0", 8)) {
+	if (StringCompare(versionString, "HTTP/1.0", 8)) {
 		*version = HTTP_VERSION_1_0;
 	}
-	else if (StringEqual(versionString, "HTTP/1.1", 8)) {
+	else if (StringCompare(versionString, "HTTP/1.1", 8)) {
 		*version = HTTP_VERSION_1_1;
 	}
 	else {
@@ -451,7 +427,7 @@ void StartXML(void* data, const char* el, const char** attr)
 {
 	ParseState* parseState = (ParseState*)data;
 
-	if (StringLength(el) == 4 && StringEqual(el, "root", 4)) {
+	if (StringLength(el) == 4 && StringCompare(el, "root", 4)) {
 		parseState->WriteContent("{");
 	}
 	else {
@@ -466,7 +442,7 @@ void StartXML(void* data, const char* el, const char** attr)
 
 		parseState->WriteContent("\"");
 		parseState->WriteContent(el, StringLength(el));
-		if (StringLength(el) == 6 && StringEqual(el, "images", 6)) {
+		if (StringLength(el) == 6 && StringCompare(el, "images", 6)) {
 			parseState->WriteContent("\": [");
 			parseState->WriteContent("\"");
 			parseState->readingArray = true;
@@ -484,7 +460,7 @@ void EndXML(void* data, const char* el)
 {
 	ParseState* parseState = (ParseState*)data;
 
-	if (StringLength(el) == 4 && StringEqual(el, "root", 4)) {
+	if (StringLength(el) == 4 && StringCompare(el, "root", 4)) {
 		parseState->WriteContent("}");
 	}
 	else {
@@ -500,7 +476,7 @@ void EndXML(void* data, const char* el)
 		}
 		parseState->bufferLength = last + 1;
 
-		if (StringLength(el) == 6 && StringEqual(el, "images", 6)) {
+		if (StringLength(el) == 6 && StringCompare(el, "images", 6)) {
 			parseState->WriteContent("\"");
 			parseState->WriteContent("]");
 			parseState->readingArray = false;
@@ -561,7 +537,7 @@ bool HandlePostRequest(const char* uri, int uriLength, HTTPState* httpState)
 	while ((dirEntry = readdir(dir)) != NULL) {
 		const char* name = dirEntry->d_name;
 		int nameLength = StringLength(name);
-		if (nameLength > 4 && StringEqual(name + nameLength - 4, ".xml", 4)) {
+		if (nameLength > 4 && StringCompare(name + nameLength - 4, ".xml", 4)) {
 			char* filePath = httpState->dirFilePaths[numFiles];
 			if (fullDirPathLength + nameLength >= URI_PATH_MAX_LENGTH) {
 				fprintf(stderr, "Path too long for XML file %s in dir %s\n", name, fullDirPath);
@@ -837,6 +813,11 @@ void* HttpsServerThread(void* data)
 	return nullptr;
 }
 
+PLATFORM_FLUSH_LOGS_FUNC(FlushLogs)
+{
+	fprintf(stderr, "TODO: implement this\n");
+}
+
 int main(int argc, char* argv[])
 {
 	if (BUFFER_LENGTH > SSIZE_MAX) {
@@ -844,7 +825,7 @@ int main(int argc, char* argv[])
 		return 1;
 	}
 
-	sigaction sigIntHandler;
+	struct sigaction sigIntHandler;
 	sigIntHandler.sa_handler = SignalHandler;
 	sigemptyset(&sigIntHandler.sa_mask);
 	sigIntHandler.sa_flags = 0;
@@ -865,6 +846,9 @@ int main(int argc, char* argv[])
 	printf("Allocated %zu bytes (%.03f MB) for server\n", allocatedMemorySize,
 		(float)allocatedMemorySize / MEGABYTES(1));
 
+	logState_ = &memory->logState;
+	flushLogs_ = FlushLogs;
+
 	pthread_t thread;
 	pthread_create(&thread, NULL, HttpsServerThread, (void*)&memory->httpsState);
 
@@ -877,3 +861,8 @@ int main(int argc, char* argv[])
 
 	return 0;
 }
+
+#include <km_debug.cpp>
+#include <km_lib.cpp>
+#include <km_log.cpp>
+#include <km_string.cpp>
