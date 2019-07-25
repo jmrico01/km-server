@@ -410,7 +410,7 @@ bool HandleGetRequest(const char* uri, int uriLength, HTTPWriter* httpWriter)
 		return true;
 	}
 
-	httpWriter->WriteStatus(200, "OK");
+	httpWriter->WriteStatusAndFlush(200, "OK");
 
 	while (true) {
 		int readBytes = read(fileFD, httpWriter->buffer, HTTPWriter::BUFFER_LENGTH);
