@@ -26,8 +26,6 @@
 
 #define LISTEN_BACKLOG_SIZE 5
 
-#define BUFFER_LENGTH MEGABYTES(1)
-
 #define HTTP_STATUS_LINE_MAX_LENGTH 1024
 
 #define URI_PATH_MAX_LENGTH 64
@@ -38,6 +36,8 @@ bool done_ = false;
 
 struct ParseState
 {
+	static const int BUFFER_LENGTH = MEGABYTES(1);
+
 	bool firstEntry;
 	bool firstEntryData;
 	bool readingEntry;
@@ -102,10 +102,11 @@ struct ParseState
 
 struct HTTPState
 {
+	static const int BUFFER_LENGTH = MEGABYTES(16);
+
 	int bufferN;
 	char buffer[BUFFER_LENGTH];
 	char dirFilePaths[DATA_MAX_FILES_PER_DIR][URI_PATH_MAX_LENGTH];
-	ParseState parseState;
 
 	int outBufferN;
 	char outBuffer[BUFFER_LENGTH];
@@ -213,8 +214,7 @@ struct HTTPState
 struct ServerMemory
 {
 	HTTPState httpState;
-	HTTPState httpsState;
-	LogState logState;
+	ParseState parseState;
 };
 
 enum HTTPRequestMethod
@@ -398,11 +398,10 @@ bool HandleGetRequest(const char* uri, int uriLength, HTTPState* httpState)
 	}
 
 	httpState->WriteStatus(200, "OK");
-
 	httpState->Flush();
 
 	while (true) {
-		httpState->outBufferN = read(fileFD, httpState->outBuffer, BUFFER_LENGTH);
+		httpState->outBufferN = read(fileFD, httpState->outBuffer, HTTPState::BUFFER_LENGTH);
 		if (httpState->outBufferN < 0) {
 			fprintf(stderr, "Failed to read file %s\n", path);
 			close(fileFD);
@@ -506,7 +505,8 @@ void DataXML(void* data, const char* content, int length)
 	parseState->WriteContent(content + offset, length - offset);
 }
 
-bool HandlePostRequest(const char* uri, int uriLength, HTTPState* httpState)
+bool HandlePostRequest(const char* uri, int uriLength,
+	HTTPState* httpState, ParseState* parseState)
 {
 	const char* DATA_DIR_PATH = "./data";
 	const int DATA_DIR_PATH_LENGTH = StringLength(DATA_DIR_PATH);
@@ -573,7 +573,7 @@ bool HandlePostRequest(const char* uri, int uriLength, HTTPState* httpState)
 			fprintf(stderr, "Error opening XML file %s\n", filePath);
 			continue;
 		}
-		int n = read(fileFD, httpState->buffer, BUFFER_LENGTH);
+		int n = read(fileFD, httpState->buffer, HTTPState::BUFFER_LENGTH);
 		if (n < 0) {
 			fprintf(stderr, "Failed to read from XML file %s\n", filePath);
 			close(fileFD);
@@ -584,9 +584,9 @@ bool HandlePostRequest(const char* uri, int uriLength, HTTPState* httpState)
 		XML_Parser parser = XML_ParserCreate(NULL);
 		XML_SetElementHandler(parser, StartXML, EndXML);
 		XML_SetCharacterDataHandler(parser, DataXML);
-		XML_SetUserData(parser, &httpState->parseState);
-		httpState->parseState.bufferLength = 0;
-		httpState->parseState.firstEntry = true;
+		XML_SetUserData(parser, parseState);
+		parseState->bufferLength = 0;
+		parseState->firstEntry = true;
 
 		XML_Parse(parser, httpState->buffer, n, true);
 
@@ -600,7 +600,7 @@ bool HandlePostRequest(const char* uri, int uriLength, HTTPState* httpState)
 			}
 		}
 		
-		if (!httpState->WriteOut(httpState->parseState.buffer, httpState->parseState.bufferLength)) {
+		if (!httpState->WriteOut(parseState->buffer, parseState->bufferLength)) {
 			fprintf(stderr, "Failed to write parsed file contents for %s\n", filePath);
 			continue;
 		}
@@ -613,7 +613,7 @@ bool HandlePostRequest(const char* uri, int uriLength, HTTPState* httpState)
 	return true;
 }
 
-bool HandleHTTPRequest(HTTPState* httpState)
+bool HandleHTTPRequest(HTTPState* httpState, ParseState* parseState)
 {
 	HTTPRequestMethod method;
 	const char* uri;
@@ -634,7 +634,7 @@ bool HandleHTTPRequest(HTTPState* httpState)
 			success = HandleGetRequest(uri, uriLength, httpState);
 		} break;
 		case HTTP_REQUEST_POST: {
-			success = HandlePostRequest(uri, uriLength, httpState);
+			success = HandlePostRequest(uri, uriLength, httpState, parseState);
 		} break;
 		default: {
 			fprintf(stderr, "Unhandled HTTP request method\n");
@@ -686,14 +686,16 @@ bool OpenSocket(int port, int* outSocketFD)
 	return true;
 }
 
-void HttpServer(HTTPState* httpState)
+void HttpServer(ServerMemory* serverMemory)
 {
+	HTTPState& httpState = serverMemory->httpState;
+
 	int socketFD;
 	if (!OpenSocket(PORT_HTTP, &socketFD)) {
 		return;
 	}
 	
-	httpState->isHttps = false;
+	httpState.isHttps = false;
 
 	sockaddr_in clientAddr;
 	socklen_t clientAddrLen = sizeof(clientAddr);
@@ -708,7 +710,7 @@ void HttpServer(HTTPState* httpState)
 		PrintSeparator();
 		printf("Received HTTP client connection\n");
 
-		int n = read(clientSocketFD, httpState->buffer, BUFFER_LENGTH);
+		int n = read(clientSocketFD, httpState.buffer, HTTPState::BUFFER_LENGTH);
 		if (n < 0) {
 			fprintf(stderr, "Failed to read request from client socket\n");
 			continue;
@@ -717,9 +719,9 @@ void HttpServer(HTTPState* httpState)
 			continue;
 		}
 
-		httpState->bufferN = n;
-		httpState->socketFD = clientSocketFD;
-		if (!HandleHTTPRequest(httpState)) {
+		httpState.bufferN = n;
+		httpState.socketFD = clientSocketFD;
+		if (!HandleHTTPRequest(&httpState, &serverMemory->parseState)) {
 			// bleh
 		}
 
@@ -731,8 +733,10 @@ void HttpServer(HTTPState* httpState)
 	printf("Stopped HTTP server on port %d\n", PORT_HTTP);
 }
 
-void HttpsServer(HTTPState* httpState)
+void HttpsServer(ServerMemory* serverMemory)
 {
+	HTTPState& httpState = serverMemory->httpState;
+
     SSL_load_error_strings();
     SSL_library_init();
     OpenSSL_add_all_algorithms();
@@ -742,7 +746,7 @@ void HttpsServer(HTTPState* httpState)
 		return;
 	}
 
-	httpState->isHttps = true;
+	httpState.isHttps = true;
 
 	sockaddr_in clientAddr;
 	socklen_t clientAddrLen = sizeof(clientAddr);
@@ -781,7 +785,7 @@ void HttpsServer(HTTPState* httpState)
 			continue;
 		}
 
-		int n = SSL_read(ssl, httpState->buffer, BUFFER_LENGTH);
+		int n = SSL_read(ssl, httpState.buffer, HTTPState::BUFFER_LENGTH);
 		if (n < 0) {
 			fprintf(stderr, "Failed to read from client socket\n");
 			continue;
@@ -790,9 +794,9 @@ void HttpsServer(HTTPState* httpState)
 			continue;
 		}
 
-		httpState->bufferN = n;
-		httpState->ssl = ssl;
-		if (!HandleHTTPRequest(httpState)) {
+		httpState.bufferN = n;
+		httpState.ssl = ssl;
+		if (!HandleHTTPRequest(&httpState, &serverMemory->parseState)) {
 			// bleh
 		}
 
@@ -809,7 +813,7 @@ void HttpsServer(HTTPState* httpState)
 
 void* HttpsServerThread(void* data)
 {
-	HttpsServer((HTTPState*)data);
+	HttpsServer((ServerMemory*)data);
 	return nullptr;
 }
 
@@ -820,7 +824,7 @@ PLATFORM_FLUSH_LOGS_FUNC(FlushLogs)
 
 int main(int argc, char* argv[])
 {
-	if (BUFFER_LENGTH > SSIZE_MAX) {
+	if (HTTPState::BUFFER_LENGTH > SSIZE_MAX) {
 		fprintf(stderr, "Buffer size too large for read(...)\n");
 		return 1;
 	}
@@ -831,9 +835,10 @@ int main(int argc, char* argv[])
 	sigIntHandler.sa_flags = 0;
 	sigaction(SIGINT, &sigIntHandler, NULL);
 
+	size_t requiredMemory = 2 * sizeof(ServerMemory) + sizeof(LogState);
 	size_t pageSize = getpagesize();
-	size_t numPages = (sizeof(ServerMemory) / pageSize) + 1;
-	size_t allocatedMemorySize = numPages * pageSize;
+	size_t requiredPages = (requiredMemory / pageSize) + 1;
+	size_t allocatedMemorySize = requiredPages * pageSize;
 	void* allocatedMemory = mmap(NULL, allocatedMemorySize,
 		PROT_READ | PROT_WRITE,
 		MAP_PRIVATE | MAP_ANONYMOUS,
@@ -842,17 +847,19 @@ int main(int argc, char* argv[])
 		fprintf(stderr, "Failed to allocate memory for server buffer using mmap\n");
 		return 1;
 	}
-	ServerMemory* memory = (ServerMemory*)allocatedMemory;
-	printf("Allocated %zu bytes (%.03f MB) for server\n", allocatedMemorySize,
+
+	ServerMemory* httpMemory = (ServerMemory*)((char*)allocatedMemory);
+	ServerMemory* httpsMemory = (ServerMemory*)((char*)allocatedMemory + sizeof(ServerMemory));
+	printf("Allocated %zu bytes (%.03f MB) for HTTP and HTTPS servers\n", allocatedMemorySize,
 		(float)allocatedMemorySize / MEGABYTES(1));
 
-	logState_ = &memory->logState;
+	logState_ = (LogState*)((char*)allocatedMemory + 2 * sizeof(ServerMemory));
 	flushLogs_ = FlushLogs;
 
 	pthread_t thread;
-	pthread_create(&thread, NULL, HttpsServerThread, (void*)&memory->httpsState);
+	pthread_create(&thread, NULL, HttpsServerThread, (void*)httpsMemory);
 
-	HttpServer(&memory->httpState);
+	HttpServer(httpMemory);
 
 	pthread_join(thread, NULL);
 
