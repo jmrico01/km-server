@@ -1,0 +1,12 @@
+author j
+date   JUN 2, 2016
+title  Two more major updates
+images [
+../images/logs/Coding Log 2.1.png
+]
+
+content {
+**1. Game engine from scratch.** Due to some of the game’s main characteristics – most importantly, the low-poly graphical style and the need for different world scales (microbiomes) – Unity is looking less and less promising as a main game engine. I’ll be working on our own C++ / OpenGL game engine, built from scratch. Wish me luck!
+
+**2. The ant ecosystem.** Ant tunnels will be long, cylindrical, procedurally generated structures beneath the surface world. They will be made up of narrow, intertwined branches, forming a texture similar to a block of instant ramen. Both the overall structure of the tunnels and the small cylindrical tubes that make them up will be procedurally generated. I’ve written a simple MATLAB script that generates a cylindrical shell of N tubes that rotate randomly but remain within a ring of a specified width. These N branches form a dense layer, a cylindrical shell, which will serve as the ant tunnels.
+}
