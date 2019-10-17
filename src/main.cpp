@@ -835,7 +835,7 @@ void* HttpsServerThread(void* data)
 	return nullptr;
 }
 
-PLATFORM_FLUSH_LOGS_FUNC(FlushLogs)
+void PlatformFlushLogs(LogState* logState)
 {
 	fprintf(stderr, "TODO: implement this\n");
 }
@@ -872,7 +872,6 @@ int main(int argc, char* argv[])
 		(float)allocatedMemorySize / MEGABYTES(1));
 
 	logState_ = (LogState*)((char*)allocatedMemory + 2 * sizeof(ServerMemory));
-	flushLogs_ = FlushLogs;
 
 	pthread_t thread;
 	pthread_create(&thread, NULL, HttpsServerThread, (void*)httpsMemory);
@@ -891,3 +890,6 @@ int main(int argc, char* argv[])
 #include <km_lib.cpp>
 #include <km_log.cpp>
 #include <km_string.cpp>
+
+#define STB_SPRINTF_IMPLEMENTATION
+#include <stb_sprintf.h>
