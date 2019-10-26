@@ -34,10 +34,15 @@
 
 bool done_ = false;
 
+void PlatformFlushLogs(LogState* logState)
+{
+	fprintf(stderr, "TODO: implement this\n");
+}
+
 struct HTTPState
 {
 	static const int BUFFER_LENGTH = MEGABYTES(1);
-
+	// FixedArray<char, BUFFER_LENGTH> buffer;
 	int bufferN;
 	char buffer[BUFFER_LENGTH];
 	char dirFilePaths[DATA_MAX_FILES_PER_DIR][URI_PATH_MAX_LENGTH];
@@ -700,17 +705,23 @@ bool OpenSocket(int port, int* outSocketFD)
 	return true;
 }
 
-void HttpServer(ServerMemory* serverMemory)
+void RunServer(ServerMemory* serverMemory, int port, bool isHttps)
 {
 	HTTPState& httpState = serverMemory->httpState;
 	HTTPWriter& httpWriter = serverMemory->httpWriter;
 
+	if (isHttps) {
+	    SSL_load_error_strings();
+	    SSL_library_init();
+	    OpenSSL_add_all_algorithms();
+	}
+
 	int socketFD;
-	if (!OpenSocket(PORT_HTTP, &socketFD)) {
+	if (!OpenSocket(port, &socketFD)) {
 		return;
 	}
 	
-	httpWriter.isHttps = false;
+	httpWriter.isHttps = isHttps;
 
 	sockaddr_in clientAddr;
 	socklen_t clientAddrLen = sizeof(clientAddr);
@@ -723,16 +734,55 @@ void HttpServer(ServerMemory* serverMemory)
 		}
 
 		PrintSeparator();
-		printf("Received HTTP client connection\n");
+		printf("Received client connection\n");
 
-		// TODO buffer might not be big enough?
-		int n = read(clientSocketFD, httpState.buffer, HTTPState::BUFFER_LENGTH);
-		if (n < 0) {
-			fprintf(stderr, "Failed to read request from client socket\n");
-			continue;
+		SSL* ssl;
+		int n;
+		if (isHttps) {
+			SSL_CTX* sslCtx = SSL_CTX_new(SSLv23_server_method());
+			SSL_CTX_set_options(sslCtx, SSL_OP_SINGLE_DH_USE);
+
+			int useCert = SSL_CTX_use_certificate_file(sslCtx, "./keys/cert.pem",
+				SSL_FILETYPE_PEM);
+			int usePriv = SSL_CTX_use_PrivateKey_file(sslCtx, "./keys/privkey.pem",
+				SSL_FILETYPE_PEM);
+			if (useCert != 1 || usePriv != 1) {
+				// bleh
+				printf("bad use\n");
+				continue;
+			}
+
+			ssl = SSL_new(sslCtx);
+			SSL_set_fd(ssl, clientSocketFD);
+
+			int sslError = SSL_accept(ssl);
+			if (sslError <= 0) {
+				// bleh
+				printf("accept error\n");
+				ERR_print_errors_fp(stderr);
+				continue;
+			}
+
+			// TODO buffer might not be big enough?
+			n = SSL_read(ssl, httpState.buffer, HTTPState::BUFFER_LENGTH);
+			if (n < 0) {
+				fprintf(stderr, "Failed to read from client socket\n");
+				continue;
+			}
+			if (n == 0) {
+				continue;
+			}
 		}
-		if (n == 0) {
-			continue;
+		else {
+			// TODO buffer might not be big enough?
+			n = read(clientSocketFD, httpState.buffer, HTTPState::BUFFER_LENGTH);
+			if (n < 0) {
+				fprintf(stderr, "Failed to read request from client socket\n");
+				continue;
+			}
+			if (n == 0) {
+				continue;
+			}
 		}
 
 		httpState.bufferN = n;
@@ -741,103 +791,23 @@ void HttpServer(ServerMemory* serverMemory)
 			// bleh
 		}
 
+		if (isHttps) {
+			SSL_shutdown(ssl);
+			SSL_free(ssl);
+		}
+
 		close(clientSocketFD);
 		printf("Closed HTTP client connection\n");
 	}
 
 	close(socketFD);
-	printf("Stopped HTTP server on port %d\n", PORT_HTTP);
-}
-
-void HttpsServer(ServerMemory* serverMemory)
-{
-	HTTPState& httpState = serverMemory->httpState;
-	HTTPWriter& httpWriter = serverMemory->httpWriter;
-
-    SSL_load_error_strings();
-    SSL_library_init();
-    OpenSSL_add_all_algorithms();
-
-	int socketFD;
-	if (!OpenSocket(PORT_HTTPS, &socketFD)) {
-		return;
-	}
-
-	httpWriter.isHttps = true;
-
-	sockaddr_in clientAddr;
-	socklen_t clientAddrLen = sizeof(clientAddr);
-
-	while (!done_) {
-		int clientSocketFD = accept(socketFD, (sockaddr*)&clientAddr, &clientAddrLen);
-		if (clientSocketFD < 0) {
-			fprintf(stderr, "Failed to accept client connection\n");
-			continue;
-		}
-
-		PrintSeparator();
-		printf("Received HTTPS client connection\n");
-
-		SSL_CTX* sslCtx = SSL_CTX_new(SSLv23_server_method());
-		SSL_CTX_set_options(sslCtx, SSL_OP_SINGLE_DH_USE);
-
-		int useCert = SSL_CTX_use_certificate_file(sslCtx, "./keys/cert.pem",
-			SSL_FILETYPE_PEM);
-		int usePriv = SSL_CTX_use_PrivateKey_file(sslCtx, "./keys/privkey.pem",
-			SSL_FILETYPE_PEM);
-		if (useCert != 1 || usePriv != 1) {
-			// bleh
-			printf("bad use\n");
-			continue;
-		}
-
-		SSL* ssl = SSL_new(sslCtx);
-		SSL_set_fd(ssl, clientSocketFD);
-
-		int sslError = SSL_accept(ssl);
-		if (sslError <= 0) {
-			// bleh
-			printf("accept error\n");
-			ERR_print_errors_fp(stderr);
-			continue;
-		}
-
-		// TODO buffer might not be big enough?
-		int n = SSL_read(ssl, httpState.buffer, HTTPState::BUFFER_LENGTH);
-		if (n < 0) {
-			fprintf(stderr, "Failed to read from client socket\n");
-			continue;
-		}
-		if (n == 0) {
-			continue;
-		}
-
-		httpState.bufferN = n;
-		httpWriter.ssl = ssl;
-		if (!HandleHTTPRequest(&httpState, &httpWriter, &serverMemory->xmlParseState)) {
-			// bleh
-		}
-
-		SSL_shutdown(ssl);
-		SSL_free(ssl);
-
-		close(clientSocketFD);
-		printf("Closed HTTPS client connection\n");
-	}
-
-	close(socketFD);
-	printf("Stopped HTTPS server on port %d\n", PORT_HTTPS);
+	printf("Stopped server on port %d\n", port);
 }
 
 void* HttpsServerThread(void* data)
 {
-	HttpsServer((ServerMemory*)data);
+	RunServer((ServerMemory*)data, PORT_HTTPS, true);
 	return nullptr;
-}
-
-void PlatformFlushLogs(LogState* logState)
-{
-	fprintf(stderr, "TODO: implement this\n");
 }
 
 int main(int argc, char* argv[])
@@ -876,7 +846,7 @@ int main(int argc, char* argv[])
 	pthread_t thread;
 	pthread_create(&thread, NULL, HttpsServerThread, (void*)httpsMemory);
 
-	HttpServer(httpMemory);
+	RunServer(httpMemory, PORT_HTTP, false);
 
 	pthread_join(thread, NULL);
 
