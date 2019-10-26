@@ -26,11 +26,9 @@
 
 #define LISTEN_BACKLOG_SIZE 5
 
-#define HTTP_STATUS_LINE_MAX_LENGTH 1024
-
-#define URI_PATH_MAX_LENGTH 64
-
-#define DATA_MAX_FILES_PER_DIR 1024
+const uint64 DATA_MAX_FILES_PER_DIR = 1024;
+const uint64 HTTP_STATUS_LINE_MAX_LENGTH = 1024;
+const uint64 URI_PATH_MAX_LENGTH = 64;
 
 bool done_ = false;
 
@@ -39,6 +37,13 @@ void PlatformFlushLogs(LogState* logState)
 	fprintf(stderr, "TODO: implement this\n");
 }
 
+void SignalHandler(int s)
+{
+	printf("Caught signal %d\n", s);
+	done_ = true;
+}
+
+#if 0
 struct HTTPState
 {
 	static const int BUFFER_LENGTH = MEGABYTES(1);
@@ -162,79 +167,21 @@ struct HTTPWriter
 		return true;
 	}
 };
-
-struct XMLParseState
-{
-	static const int BUFFER_LENGTH = MEGABYTES(1);
-
-	bool firstEntry;
-	bool firstEntryData;
-	bool readingEntry;
-	bool readingArray;
-	bool readingArrayElement;
-
-	// TODO buffer might not be big enough?
-	int bufferLength;
-	char buffer[BUFFER_LENGTH];
-
-	bool WriteContent(const char* str, int n)
-	{
-		if (bufferLength + n > BUFFER_LENGTH) {
-			return false;
-		}
-
-		if (readingEntry) {
-			// TODO fix newline expansion
-			int offset = 0;
-			for (int i = 0; i < n; i++) {
-				if (str[i] == '\n' && (!readingArray || (readingArray && readingArrayElement))) {
-					buffer[bufferLength + offset] = '\\';
-					offset++;
-					buffer[bufferLength + offset] = 'n';
-				}
-				else if (str[i] == '"') {
-					buffer[bufferLength + offset] = '\\';
-					offset++;
-					buffer[bufferLength + offset] = '"';
-				}
-				else if (readingArray && readingArrayElement && str[i] == ',') {
-					buffer[bufferLength + offset] = '"';
-					offset++;
-					buffer[bufferLength + offset] = ',';
-					readingArrayElement = false;
-				}
-				else if (readingArray && !readingArrayElement && !IsWhitespace(str[i])) {
-					buffer[bufferLength + offset] = '"';
-					offset++;
-					buffer[bufferLength + offset] = str[i];
-					readingArrayElement = true;
-				}
-				else {
-					buffer[bufferLength + offset] = str[i];
-				}
-				offset++;
-			}
-			bufferLength += offset;
-		}
-		else {
-			memcpy(buffer + bufferLength, str, n);
-			bufferLength += n;
-		}
-
-		return true;
-	}
-
-	bool WriteContent(const char* str)
-	{
-		return WriteContent(str, StringLength(str));
-	}
-};
+#endif
 
 struct ServerMemory
 {
-	HTTPState httpState;
-	HTTPWriter httpWriter;
-	XMLParseState xmlParseState;
+	static const uint64 REQUEST_BUFFER_LENGTH = MEGABYTES(1);
+	FixedArray<char, REQUEST_BUFFER_LENGTH> requestBuffer;
+
+	// HTTPState httpState;
+	// HTTPWriter httpWriter;
+	// XMLParseState xmlParseState;
+
+	void Init()
+	{
+		requestBuffer.Init();
+	}
 };
 
 enum HTTPRequestMethod
@@ -249,71 +196,71 @@ enum HTTPVersion
 	HTTP_VERSION_1_1
 };
 
-void SignalHandler(int s)
-{
-	printf("Caught signal %d\n", s);
-	done_ = true;
-}
-
 void PrintSeparator()
 {
 	printf("========================================"
 		"========================================\n");
 }
 
-bool ParseHTTPRequest(const char* request, int requestLength,
-	HTTPRequestMethod* method, const char** uri, int* uriLength, HTTPVersion* version)
+bool ParseHTTPRequest(const Array<char>& request,
+	HTTPRequestMethod* outMethod, HTTPVersion* outVersion, Array<char>* outUri)
 {
 	// Read and parse request according to HTTP/1.1 standard
 	// Source: https://www.w3.org/Protocols/rfc2616/rfc2616-sec5.html
-	const char* methodString = request;
-	int firstSpace = 0;
-	while (firstSpace < requestLength && request[firstSpace] != ' ') {
-		firstSpace++;
+	uint64 i = 0;
+	while (i < request.size && request[i] != ' ') {
+		i++;
 	}
 
-	if (StringCompare(methodString, "GET", 3)) {
-		*method = HTTP_REQUEST_GET;
+	Array<char> methodString;
+	methodString.data = request.data;
+	methodString.size = i;
+	if (StringCompare(methodString, "GET")) {
+		*outMethod = HTTP_REQUEST_GET;
 	}
-	else if (StringCompare(methodString, "POST", 4)) {
-		*method = HTTP_REQUEST_POST;
+	else if (StringCompare(methodString, "POST")) {
+		*outMethod = HTTP_REQUEST_POST;
 	}
 	else {
 		fprintf(stderr, "Unrecognized HTTP request method. Full request:\n");
-		fprintf(stderr, "%.*s\n", requestLength, request);
+		fprintf(stderr, "%.*s\n", (int)request.size, request.data);
 		return false;
 	}
 
-	if (firstSpace + 1 >= requestLength) {
+	i++;
+	if (i >= request.size) {
 		fprintf(stderr, "Incomplete HTTP request\n");
 		return false;
 	}
-	*uri = &request[firstSpace + 1];
-	int secondSpace = firstSpace + 1;
-	while (secondSpace < requestLength && request[secondSpace] != ' ') {
-		secondSpace++;
+	outUri->data = &request.data[i];
+	uint64 iStart = i;
+	while (i < request.size && request[i] != ' ') {
+		i++;
 	}
-	*uriLength = secondSpace - firstSpace - 1;
+	outUri->size = i - iStart;
 
-	if (secondSpace + 1 >= requestLength) {
+	i++;
+	if (i >= request.size) {
 		fprintf(stderr, "Incomplete HTTP request\n");
 		return false;
 	}
-	const char* versionString = &request[secondSpace + 1];
-	int lineEnd = secondSpace + 1;
-	while (lineEnd < requestLength && request[lineEnd] != '\r') {
-		lineEnd++;
+	Array<char> versionString;
+	versionString.data = &request.data[i];
+	iStart = i;
+	while (i < request.size && request[i] != '\r') {
+		i++;
 	}
+	versionString.size = i - iStart;
 
-	if (StringCompare(versionString, "HTTP/1.0", 8)) {
-		*version = HTTP_VERSION_1_0;
+	if (StringCompare(versionString, "HTTP/1.0")) {
+		*outVersion = HTTP_VERSION_1_0;
 	}
-	else if (StringCompare(versionString, "HTTP/1.1", 8)) {
-		*version = HTTP_VERSION_1_1;
+	else if (StringCompare(versionString, "HTTP/1.1")) {
+		*outVersion = HTTP_VERSION_1_1;
 	}
 	else {
 		fprintf(stderr, "Unrecognized HTTP version. Full request:\n");
-		fprintf(stderr, "%.*s\n", requestLength, request);
+		fprintf(stderr, "%.*s\n", (int)request.size, request.data);
 		return false;
 	}
 
@@ -322,10 +269,11 @@ bool ParseHTTPRequest(const char* request, int requestLength,
 	return true;
 }
 
-bool ValidateGetURI(const char* uri, int uriLength)
+#if 0
+bool ValidateGetURI(const Array<char>& uri)
 {
 	int consecutiveDots = 0;
-	for (int i = 0; i < uriLength; i++) {
+	for (uint64 i = 0; i < uri.size; i++) {
 		if (uri[i] == '.') {
 			if (consecutiveDots > 0) {
 				return false;
@@ -340,9 +288,9 @@ bool ValidateGetURI(const char* uri, int uriLength)
 	return true;
 }
 
-bool HandleGetRequest(const char* uri, int uriLength, HTTPWriter* httpWriter)
+bool HandleGetRequest(const Array<char>& uri, HTTPWriter* httpWriter)
 {
-	if (!ValidateGetURI(uri, uriLength)) {
+	if (!ValidateGetURI(uri)) {
 		fprintf(stderr, "URI failed validation: %.*s\n", uriLength, uri);
 		httpWriter->WriteStatusAndFlush(400, "Bad Request");
 		return true;
@@ -631,48 +579,7 @@ bool HandlePostRequest(const char* uri, int uriLength,
 
 	return true;
 }
-
-bool HandleHTTPRequest(HTTPState* httpState, HTTPWriter* httpWriter, XMLParseState* xmlParseState)
-{
-	HTTPRequestMethod method;
-	const char* uri;
-	int uriLength;
-	HTTPVersion version;
-	if (!ParseHTTPRequest(httpState->buffer, httpState->bufferN, &method, &uri, &uriLength, &version)) {
-		// TODO bleh
-		return false;
-	}
-
-	printf("HTTP version %d request, method %d, URI: %.*s\n",
-		version, method, uriLength, uri);
-	
-	httpWriter->bufferSize = 0;
-	bool success = false;
-	switch (method) {
-		case HTTP_REQUEST_GET: {
-			success = HandleGetRequest(uri, uriLength, httpWriter);
-		} break;
-		case HTTP_REQUEST_POST: {
-			success = HandlePostRequest(uri, uriLength, httpState, httpWriter, xmlParseState);
-		} break;
-		default: {
-			fprintf(stderr, "Unhandled HTTP request method\n");
-			return false;
-		} break;
-	}
-
-	if (!success) {
-		fprintf(stderr, "Failed to handle HTTP request\n");
-		return false;
-	}
-
-	if (httpWriter->bufferSize != 0) {
-		fprintf(stderr, "Unflushed data in HTTP writer after handler\n");
-		httpWriter->Flush();
-	}
-
-	return true;
-}
+#endif
 
 bool OpenSocket(int port, int* outSocketFD)
 {
@@ -699,17 +606,12 @@ bool OpenSocket(int port, int* outSocketFD)
 		return false;
 	}
 
-	printf("Listening on port %d\n", port);
-
 	*outSocketFD = socketFD;
 	return true;
 }
 
 void RunServer(ServerMemory* serverMemory, int port, bool isHttps)
 {
-	HTTPState& httpState = serverMemory->httpState;
-	HTTPWriter& httpWriter = serverMemory->httpWriter;
-
 	if (isHttps) {
 	    SSL_load_error_strings();
 	    SSL_library_init();
@@ -720,8 +622,9 @@ void RunServer(ServerMemory* serverMemory, int port, bool isHttps)
 	if (!OpenSocket(port, &socketFD)) {
 		return;
 	}
-	
-	httpWriter.isHttps = isHttps;
+	defer(close(socketFD));
+
+	printf("Listening on port %d\n", port);
 
 	sockaddr_in clientAddr;
 	socklen_t clientAddrLen = sizeof(clientAddr);
@@ -732,12 +635,12 @@ void RunServer(ServerMemory* serverMemory, int port, bool isHttps)
 			fprintf(stderr, "Failed to accept client connection\n");
 			continue;
 		}
+		defer(close(clientSocketFD));
 
 		PrintSeparator();
 		printf("Received client connection\n");
 
 		SSL* ssl;
-		int n;
 		if (isHttps) {
 			SSL_CTX* sslCtx = SSL_CTX_new(SSLv23_server_method());
 			SSL_CTX_set_options(sslCtx, SSL_OP_SINGLE_DH_USE);
@@ -764,7 +667,8 @@ void RunServer(ServerMemory* serverMemory, int port, bool isHttps)
 			}
 
 			// TODO buffer might not be big enough?
-			n = SSL_read(ssl, httpState.buffer, HTTPState::BUFFER_LENGTH);
+			int n = SSL_read(ssl, &serverMemory->requestBuffer[0],
+				ServerMemory::REQUEST_BUFFER_LENGTH);
 			if (n < 0) {
 				fprintf(stderr, "Failed to read from client socket\n");
 				continue;
@@ -772,10 +676,12 @@ void RunServer(ServerMemory* serverMemory, int port, bool isHttps)
 			if (n == 0) {
 				continue;
 			}
+			serverMemory->requestBuffer.array.size = n;
 		}
 		else {
 			// TODO buffer might not be big enough?
-			n = read(clientSocketFD, httpState.buffer, HTTPState::BUFFER_LENGTH);
+			int n = read(clientSocketFD, &serverMemory->requestBuffer[0],
+				ServerMemory::REQUEST_BUFFER_LENGTH);
 			if (n < 0) {
 				fprintf(stderr, "Failed to read request from client socket\n");
 				continue;
@@ -783,24 +689,49 @@ void RunServer(ServerMemory* serverMemory, int port, bool isHttps)
 			if (n == 0) {
 				continue;
 			}
+			serverMemory->requestBuffer.array.size = n;
 		}
 
-		httpState.bufferN = n;
-		httpWriter.socketFD = clientSocketFD;
-		if (!HandleHTTPRequest(&httpState, &httpWriter, &serverMemory->xmlParseState)) {
-			// bleh
+		HTTPRequestMethod method;
+		HTTPVersion version;
+		Array<char> uri;
+		if (!ParseHTTPRequest(serverMemory->requestBuffer.array, &method, &version, &uri)) {
+			// TODO bleh
 		}
+		printf("HTTP version %d request, method %d, URI: %.*s\n",
+			version, method, (int)uri.size, uri.data);
+
+		/*bool success = false;
+		switch (method) {
+			case HTTP_REQUEST_GET: {
+				success = HandleGetRequest(uri, httpWriter);
+			} break;
+			case HTTP_REQUEST_POST: {
+				success = HandlePostRequest(uri, httpState, httpWriter, xmlParseState);
+			} break;
+			default: {
+				fprintf(stderr, "Unhandled HTTP request method\n");
+				return false;
+			} break;
+		}
+		if (!success) {
+			fprintf(stderr, "Failed to handle HTTP request\n");
+			return false;
+		}
+
+		if (httpWriter->bufferSize != 0) {
+			fprintf(stderr, "Unflushed data in HTTP writer after handler\n");
+			httpWriter->Flush();
+		}*/
 
 		if (isHttps) {
 			SSL_shutdown(ssl);
 			SSL_free(ssl);
 		}
 
-		close(clientSocketFD);
 		printf("Closed HTTP client connection\n");
 	}
 
-	close(socketFD);
 	printf("Stopped server on port %d\n", port);
 }
 
@@ -812,7 +743,7 @@ void* HttpsServerThread(void* data)
 
 int main(int argc, char* argv[])
 {
-	if (HTTPState::BUFFER_LENGTH > SSIZE_MAX) {
+	if (ServerMemory::REQUEST_BUFFER_LENGTH > SSIZE_MAX) {
 		fprintf(stderr, "Buffer size too large for read(...)\n");
 		return 1;
 	}
@@ -837,7 +768,9 @@ int main(int argc, char* argv[])
 	}
 
 	ServerMemory* httpMemory = (ServerMemory*)((char*)allocatedMemory);
+	httpMemory->Init();
 	ServerMemory* httpsMemory = (ServerMemory*)((char*)allocatedMemory + sizeof(ServerMemory));
+	httpsMemory->Init();
 	printf("Allocated %zu bytes (%.03f MB) for HTTP and HTTPS servers\n", allocatedMemorySize,
 		(float)allocatedMemorySize / MEGABYTES(1));
 
