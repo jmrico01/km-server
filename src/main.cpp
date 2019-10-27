@@ -99,10 +99,10 @@ struct HTTPWriter
 			return false;
 		}
 
-		const char* STATUS_TEMPLATE = "HTTP/1.1 %d %s\r\n\r\n";
+		const char* STATUS_TEMPLATE = "HTTP/1.1 %d %s\r\n";
 		int n = snprintf(bufferPtr->array.data, BUFFER_MAX_SIZE,
 			STATUS_TEMPLATE, statusCode, statusMsg);
-		if (n < 0 || n >= HTTP_STATUS_LINE_MAX_LENGTH) {
+		if (n < 0 || (uint64)n >= HTTP_STATUS_LINE_MAX_LENGTH) {
 			fprintf(stderr, "HTTP status line too long: code %d, msg %s\n", statusCode, statusMsg);
 			return false;
 		}
@@ -148,11 +148,17 @@ struct HTTPWriter
 			}
 		}
 		else {
-			memcpy(bufferPtr->array.data + bufferPtr->array.size, data, n);
+			MemCopy(bufferPtr->array.data + bufferPtr->array.size, data, n);
 			bufferPtr->array.size += n;
 		}
 
 		return true;
+	}
+
+	bool Write(const char* string)
+	{
+		uint64 stringLength = StringLength(string);
+		return Write(string, stringLength);
 	}
 };
 
@@ -206,86 +212,84 @@ bool ValidateGetURI(const Array<char>& uri)
 template <uint64 BUFFER_MAX_SIZE>
 bool HandleGetRequest(const Array<char>& uri, HTTPWriter<BUFFER_MAX_SIZE>* httpWriter)
 {
-	#if 0
+	// Serve static file
 	if (!ValidateGetURI(uri)) {
-		fprintf(stderr, "URI failed validation: %.*s\n", uriLength, uri);
+		fprintf(stderr, "URI failed validation: %.*s\n", (int)uri.size, uri.data);
 		httpWriter->WriteStatusAndFlush(400, "Bad Request");
 		return true;
 	}
 
-	const char* PUBLIC_DIR_PATH = "./public";
-	const int PUBLIC_DIR_PATH_LENGTH = StringLength(PUBLIC_DIR_PATH);
-	char path[URI_PATH_MAX_LENGTH];
-	int pathLength = PUBLIC_DIR_PATH_LENGTH + uriLength;
-	if (pathLength >= URI_PATH_MAX_LENGTH) {
-		fprintf(stderr, "URI full path too long: %.*s\n", uriLength, uri);
+	FixedArray<char, URI_PATH_MAX_LENGTH> filePath;
+	filePath.Init();
+	InitFromCString(&filePath, "./public");
+	if (filePath.array.size + uri.size >= URI_PATH_MAX_LENGTH) {
+		fprintf(stderr, "URI full path too long: %.*s\n", (int)uri.size, uri.data);
 		httpWriter->WriteStatusAndFlush(400, "Bad Request");
 		return true;
 	}
-	memcpy(path, PUBLIC_DIR_PATH, PUBLIC_DIR_PATH_LENGTH);
-	int offset = 0;
-	for (int i = 0; i < uriLength; i++) {
-		const char* c = uri + i;
-		if (i < uriLength - 3 && *c == '%' && *(c + 1) == '2' && *(c + 2) == '0') {
-			path[PUBLIC_DIR_PATH_LENGTH + offset] = ' ';
+
+	uint64 offset = 0;
+	for (uint64 i = 0; i < uri.size; i++) {
+		const char* c = uri.data + i;
+		if (i < uri.size - 3 && *c == '%' && *(c + 1) == '2' && *(c + 2) == '0') {
+			filePath.Append(' ');
 			i += 2;
 		}
 		else {
-			path[PUBLIC_DIR_PATH_LENGTH + offset] = *c;
+			filePath.Append(*c);
 		}
 		offset++;
 	}
-	path[PUBLIC_DIR_PATH_LENGTH + offset] = '\0';
-	// memcpy(path + PUBLIC_DIR_PATH_LENGTH, uri, uriLength);
-	// path[pathLength] = '\0';
 
 	// Append index.html if necessary
-	if (path[pathLength - 1] != '/') {
-		int last = pathLength - 1;
+	if (filePath[filePath.array.size - 1] != '/') {
+		uint64 lastSlash = filePath.array.size;
 		bool dotBeforeSlash = false;
-		while (last >= 0 && path[last] != '/') {
-			if (path[last] == '.') {
+		while (lastSlash != 0 && filePath[lastSlash - 1] != '/') {
+			if (filePath[lastSlash - 1] == '.') {
 				dotBeforeSlash = true;
 			}
-			last--;
+			lastSlash--;
 		}
-		if (last != pathLength - 1 && !dotBeforeSlash) {
-			if (pathLength + 1 >= URI_PATH_MAX_LENGTH) {
-				fprintf(stderr, "URI + slash too long: %.*s\n", uriLength, uri);
+		if (!dotBeforeSlash) {
+			if (filePath.array.size + 1 >= URI_PATH_MAX_LENGTH) {
+				fprintf(stderr, "URI + slash too long: %.*s\n", (int)uri.size, uri.data);
 				httpWriter->WriteStatusAndFlush(400, "Bad Request");
 				return true;
 			}
-			path[pathLength++] = '/';
+			filePath.Append('/');
 		}
 	}
-	if (path[pathLength - 1] == '/') {
-		const char* indexFile = "index.html";
-		int indexFileLength = StringLength(indexFile);
-		if (pathLength + indexFileLength >= URI_PATH_MAX_LENGTH) {
-			fprintf(stderr, "URI + index.html too long: %.*s\n", uriLength, uri);
+	if (filePath[filePath.array.size - 1] == '/') {
+		if (!StringAppend(&filePath, "index.html")) {
+			fprintf(stderr, "URI + index.html too long: %.*s\n", (int)uri.size, uri.data);
 			httpWriter->WriteStatusAndFlush(400, "Bad Request");
 			return true;
 		}
-		for (int i = 0; i < indexFileLength; i++) {
-			path[pathLength + i] = indexFile[i];
-		}
-		path[pathLength + indexFileLength] = '\0';
 	}
 
-	printf("Loading and sending file %s\n", path);
-	int fileFD = open(path, O_RDONLY);
+	if (filePath.array.size + 1 >= URI_PATH_MAX_LENGTH) {
+		fprintf(stderr, "URI + null terminator too long: %.*s\n", (int)uri.size, uri.data);
+		httpWriter->WriteStatusAndFlush(400, "Bad Request");
+		return true;
+	}
+	filePath.Append('\0');
+
+	printf("Loading and sending file %s\n", filePath.array.data);
+	int fileFD = open(filePath.array.data, O_RDONLY);
 	if (fileFD < 0) {
-		printf("Failed to open file %s\n", path);
+		printf("Failed to open file %s\n", filePath.array.data);
 		httpWriter->WriteStatusAndFlush(404, "Not Found");
 		return true;
 	}
 
-	httpWriter->WriteStatusAndFlush(200, "OK");
+	httpWriter->WriteStatus(200, "OK");
+	httpWriter->Write("Content-Type: text/html; charset=UTF-8\r\n\r\n");
 
 	while (true) {
-		int readBytes = read(fileFD, httpWriter->buffer, HTTPWriter::BUFFER_LENGTH);
+		int readBytes = read(fileFD, httpWriter->bufferPtr->array.data, BUFFER_MAX_SIZE);
 		if (readBytes < 0) {
-			fprintf(stderr, "Failed to read file %s\n", path);
+			fprintf(stderr, "Failed to read file %s\n", filePath.array.data);
 			close(fileFD);
 			httpWriter->Flush();
 			return false;
@@ -294,15 +298,14 @@ bool HandleGetRequest(const Array<char>& uri, HTTPWriter<BUFFER_MAX_SIZE>* httpW
 			break;
 		}
 
-		httpWriter->bufferSize = readBytes;
+		httpWriter->bufferPtr->array.size = readBytes;
 		if (!httpWriter->Flush()) {
-			fprintf(stderr, "Failed to write file %s to HTTP response\n", path);
+			fprintf(stderr, "Failed to write file %s to HTTP response\n", filePath.array.data);
 			return false;
 		}
 	}
 
 	close(fileFD);
-#endif
 	return true;
 }
 
@@ -403,8 +406,8 @@ bool HandlePostRequest(const char* uri, int uriLength,
 		httpWriter->WriteStatusAndFlush(400, "Bad Request");
 		return true;
 	}
-	memcpy(fullDirPath, DATA_DIR_PATH, DATA_DIR_PATH_LENGTH);
-	memcpy(fullDirPath + DATA_DIR_PATH_LENGTH, uri, uriLength);
+	MemCopy(fullDirPath, DATA_DIR_PATH, DATA_DIR_PATH_LENGTH);
+	MemCopy(fullDirPath + DATA_DIR_PATH_LENGTH, uri, uriLength);
 	if (fullDirPath[fullDirPathLength - 1] != '/') {
 		fullDirPath[fullDirPathLength++] = '/'; // TODO not bounds-checking
 	}
@@ -428,8 +431,8 @@ bool HandlePostRequest(const char* uri, int uriLength,
 				fprintf(stderr, "Path too long for XML file %s in dir %s\n", name, fullDirPath);
 				continue;
 			}
-			memcpy(filePath, fullDirPath, fullDirPathLength);
-			memcpy(filePath + fullDirPathLength, name, nameLength);
+			MemCopy(filePath, fullDirPath, fullDirPathLength);
+			MemCopy(filePath + fullDirPathLength, name, nameLength);
 			filePath[fullDirPathLength + nameLength] = '\0';
 
 			numFiles++;
@@ -499,8 +502,8 @@ bool HandlePostRequest(const char* uri, int uriLength,
 }
 #endif
 
-bool ParseHTTPRequest(const Array<char>& request,
-	HTTPRequestMethod* outMethod, HTTPVersion* outVersion, Array<char>* outUri)
+bool ParseHTTPRequest(const Array<char>& request, HTTPRequestMethod* outMethod,
+	HTTPVersion* outVersion, FixedArray<char, URI_PATH_MAX_LENGTH>* outUri)
 {
 	// Read and parse request according to HTTP/1.1 standard
 	// Source: https://www.w3.org/Protocols/rfc2616/rfc2616-sec5.html
@@ -529,25 +532,25 @@ bool ParseHTTPRequest(const Array<char>& request,
 		fprintf(stderr, "Incomplete HTTP request\n");
 		return false;
 	}
-	outUri->data = &request.data[i];
-	uint64 iStart = i;
+	uint64 uriStart = i;
 	while (i < request.size && request[i] != ' ') {
 		i++;
 	}
-	outUri->size = i - iStart;
+	outUri->array.size = i - uriStart;
+	MemCopy(outUri->array.data, &request.data[uriStart], outUri->array.size);
 
 	i++;
 	if (i >= request.size) {
 		fprintf(stderr, "Incomplete HTTP request\n");
 		return false;
 	}
-	Array<char> versionString;
-	versionString.data = &request.data[i];
-	iStart = i;
+	uint64 versionStart = i;
 	while (i < request.size && request[i] != '\r') {
 		i++;
 	}
-	versionString.size = i - iStart;
+	Array<char> versionString;
+	versionString.data = &request.data[versionStart];
+	versionString.size = i - versionStart;
 
 	if (StringCompare(versionString, "HTTP/1.0")) {
 		*outVersion = HTTP_VERSION_1_0;
@@ -677,18 +680,16 @@ void RunServer(ServerMemory* serverMemory, int port, bool isHttps)
 
 		HTTPRequestMethod method;
 		HTTPVersion version;
-		Array<char> uriRef;
-		if (!ParseHTTPRequest(serverMemory->buffer.array, &method, &version, &uriRef)) {
-			// TODO bleh
-		}
 		FixedArray<char, URI_PATH_MAX_LENGTH> uri;
 		uri.Init();
-		memcpy(uri.fixedArray, uriRef.data, uriRef.size);
-		uri.array.size = uriRef.size;
+		if (!ParseHTTPRequest(serverMemory->buffer.array, &method, &version, &uri)) {
+			// TODO bleh
+		}
 		printf("HTTP version %d request, method %d, URI: %.*s\n",
 			version, method, (int)uri.array.size, uri.array.data);
 
 		HTTPWriter<ServerMemory::BUFFER_LENGTH> httpWriter;
+		serverMemory->buffer.array.size = 0;
 		httpWriter.bufferPtr = &serverMemory->buffer;
 		httpWriter.isHttps = isHttps;
 		httpWriter.socketFD = clientSocketFD;
@@ -774,6 +775,7 @@ int main(int argc, char* argv[])
 
 	RunServer(httpMemory, PORT_HTTP, false);
 
+	pthread_kill(thread, 15);
 	pthread_join(thread, NULL);
 
 	munmap(allocatedMemory, allocatedMemorySize);
