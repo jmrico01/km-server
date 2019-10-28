@@ -28,6 +28,7 @@
 
 const uint64 DATA_MAX_FILES_PER_DIR = 1024;
 const uint64 HTTP_STATUS_LINE_MAX_LENGTH = 1024;
+const uint64 HTTP_CONTENT_TYPE_MAX_LENGTH = 1024;
 const uint64 URI_PATH_MAX_LENGTH = 256;
 
 bool done_ = false;
@@ -42,6 +43,43 @@ void SignalHandler(int s)
 	printf("Caught signal %d\n", s);
 	done_ = true;
 }
+
+enum class StaticFileType
+{
+	HTML = 0,
+	JS,
+	CSS,
+	PNG,
+	JPG,
+	TTF,
+	OTF,
+	WOFF,
+	WOFF2,
+
+	OTHER
+};
+const char* fileTypeExtensions_[] = {
+	"html",
+	"js",
+	"css"
+	"png",
+	"jpg",
+	"ttf",
+	"otf",
+	"woff",
+	"woff2"
+};
+const char* fileTypeContentTypes_[] = {
+	"text/html; charset=UTF-8",
+	"text/javascript; charset=UTF-8",
+	"text/css; charset=UTF-8",
+	"image/png",
+	"image/jpeg",
+	"font/ttf",
+	"font/otf",
+	"application/font-woff",
+	"application/font-woff2"
+};
 
 template <uint64 BUFFER_MAX_SIZE>
 struct HTTPWriter
@@ -112,9 +150,12 @@ struct HTTPWriter
 		return true;
 	}
 
-	bool WriteStatusAndFlush(int statusCode, const char* statusMsg)
+	bool WriteStatusAndEndHeader(int statusCode, const char* statusMsg)
 	{
 		if (!WriteStatus(statusCode, statusMsg)) {
+			return false;
+		}
+		if (!WriteString("\r\n")) {
 			return false;
 		}
 		if (!Flush()) {
@@ -155,7 +196,12 @@ struct HTTPWriter
 		return true;
 	}
 
-	bool Write(const char* string)
+	bool Write(Array<char> data)
+	{
+		return Write(data.data, data.size);
+	}
+
+	bool WriteString(const char* string)
 	{
 		uint64 stringLength = StringLength(string);
 		return Write(string, stringLength);
@@ -215,7 +261,7 @@ bool HandleGetRequest(const Array<char>& uri, HTTPWriter<BUFFER_MAX_SIZE>* httpW
 	// Serve static file
 	if (!ValidateGetURI(uri)) {
 		fprintf(stderr, "URI failed validation: %.*s\n", (int)uri.size, uri.data);
-		httpWriter->WriteStatusAndFlush(400, "Bad Request");
+		httpWriter->WriteStatusAndEndHeader(400, "Bad Request");
 		return true;
 	}
 
@@ -224,7 +270,7 @@ bool HandleGetRequest(const Array<char>& uri, HTTPWriter<BUFFER_MAX_SIZE>* httpW
 	InitFromCString(&filePath, "./public");
 	if (filePath.array.size + uri.size >= URI_PATH_MAX_LENGTH) {
 		fprintf(stderr, "URI full path too long: %.*s\n", (int)uri.size, uri.data);
-		httpWriter->WriteStatusAndFlush(400, "Bad Request");
+		httpWriter->WriteStatusAndEndHeader(400, "Bad Request");
 		return true;
 	}
 
@@ -254,7 +300,7 @@ bool HandleGetRequest(const Array<char>& uri, HTTPWriter<BUFFER_MAX_SIZE>* httpW
 		if (!dotBeforeSlash) {
 			if (filePath.array.size + 1 >= URI_PATH_MAX_LENGTH) {
 				fprintf(stderr, "URI + slash too long: %.*s\n", (int)uri.size, uri.data);
-				httpWriter->WriteStatusAndFlush(400, "Bad Request");
+				httpWriter->WriteStatusAndEndHeader(400, "Bad Request");
 				return true;
 			}
 			filePath.Append('/');
@@ -263,14 +309,14 @@ bool HandleGetRequest(const Array<char>& uri, HTTPWriter<BUFFER_MAX_SIZE>* httpW
 	if (filePath[filePath.array.size - 1] == '/') {
 		if (!StringAppend(&filePath, "index.html")) {
 			fprintf(stderr, "URI + index.html too long: %.*s\n", (int)uri.size, uri.data);
-			httpWriter->WriteStatusAndFlush(400, "Bad Request");
+			httpWriter->WriteStatusAndEndHeader(400, "Bad Request");
 			return true;
 		}
 	}
 
 	if (filePath.array.size + 1 >= URI_PATH_MAX_LENGTH) {
 		fprintf(stderr, "URI + null terminator too long: %.*s\n", (int)uri.size, uri.data);
-		httpWriter->WriteStatusAndFlush(400, "Bad Request");
+		httpWriter->WriteStatusAndEndHeader(400, "Bad Request");
 		return true;
 	}
 	filePath.Append('\0');
@@ -279,12 +325,35 @@ bool HandleGetRequest(const Array<char>& uri, HTTPWriter<BUFFER_MAX_SIZE>* httpW
 	int fileFD = open(filePath.array.data, O_RDONLY);
 	if (fileFD < 0) {
 		printf("Failed to open file %s\n", filePath.array.data);
-		httpWriter->WriteStatusAndFlush(404, "Not Found");
+		httpWriter->WriteStatusAndEndHeader(404, "Not Found");
 		return true;
 	}
 
 	httpWriter->WriteStatus(200, "OK");
-	httpWriter->Write("Content-Type: text/html; charset=UTF-8\r\n\r\n");
+	httpWriter->WriteString("Connection: keep-alive\r\n");
+	httpWriter->WriteString("Content-Encoding: identity\r\n");
+
+	uint64 lastDot = GetLastOccurrence(filePath.array, '.');
+	Array<char> fileExtension;
+	fileExtension.data = &filePath[lastDot];
+	fileExtension.size = filePath.array.size - lastDot;
+	StaticFileType fileType = StaticFileType::OTHER;
+	for (int i = 0; i < (int)StaticFileType::OTHER; i++) {
+		if (StringCompare(fileExtension, fileTypeExtensions_[i])) {
+			fileType = (StaticFileType)i;
+		}
+	}
+	if (fileType != StaticFileType::OTHER) {
+		FixedArray<char, HTTP_CONTENT_TYPE_MAX_LENGTH> contentType;
+		contentType.Init();
+		InitFromCString(&contentType, "Content-Type: ");
+		StringAppend(&contentType, fileTypeContentTypes_[(int)fileType]);
+		StringAppend(&contentType, "\r\n");
+		httpWriter->Write(contentType.array);
+	}
+
+	httpWriter->WriteString("\r\n");
+	httpWriter->Flush();
 
 	while (true) {
 		int readBytes = read(fileFD, httpWriter->bufferPtr->array.data, BUFFER_MAX_SIZE);
