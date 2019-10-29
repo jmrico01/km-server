@@ -81,30 +81,28 @@ const char* fileTypeContentTypes_[] = {
 	"application/font-woff2"
 };
 
-template <uint64 BUFFER_MAX_SIZE>
+template <uint64 S>
 struct HTTPWriter
 {
-	FixedArray<char, BUFFER_MAX_SIZE>* bufferPtr;
+	FixedArray<char, S> buffer;
 	bool isHttps;
 	int socketFD;
 	SSL* ssl;
 
 	bool Flush()
 	{
-		printf("Flushing %lu bytes\n", bufferPtr->array.size);
-
-		if (bufferPtr->array.size == 0) {
+		if (buffer.array.size == 0) {
 			return true;
 		}
 
 		uint64 n = 0;
-		while (n < bufferPtr->array.size) {
+		while (n < buffer.array.size) {
 			int written;
 			if (isHttps) {
-				written = SSL_write(ssl, bufferPtr->array.data + n, bufferPtr->array.size - n);
+				written = SSL_write(ssl, buffer.array.data + n, buffer.array.size - n);
 			}
 			else {
-				written = write(socketFD, bufferPtr->array.data + n, bufferPtr->array.size - n);
+				written = write(socketFD, buffer.array.data + n, buffer.array.size - n);
 			}
 
 			if (written < 0) {
@@ -118,34 +116,32 @@ struct HTTPWriter
 			n += written;
 		}
 
-		if (n != bufferPtr->array.size) {
+		if (n != buffer.array.size) {
 			fprintf(stderr, "Incorrect number of bytes flushed (%lu, expected %lu)\n",
-				n, bufferPtr->array.size);
+				n, buffer.array.size);
 			return false;
 		}
 
-		bufferPtr->array.size = 0;
+		buffer.array.size = 0;
 		return true;
 	}
 
 	bool WriteStatus(int statusCode, const char* statusMsg)
 	{
-		printf("WriteStatus %d, message %s\n", statusCode, statusMsg);
-
-		if (bufferPtr->array.size != 0) {
+		if (buffer.array.size != 0) {
 			fprintf(stderr, "WriteStatus called with non-zero buffer size\n");
 			return false;
 		}
 
 		const char* STATUS_TEMPLATE = "HTTP/1.1 %d %s\r\n";
-		int n = snprintf(bufferPtr->array.data, BUFFER_MAX_SIZE,
+		int n = snprintf(buffer.array.data, BUFFER_MAX_SIZE,
 			STATUS_TEMPLATE, statusCode, statusMsg);
 		if (n < 0 || (uint64)n >= HTTP_STATUS_LINE_MAX_LENGTH) {
 			fprintf(stderr, "HTTP status line too long: code %d, msg %s\n", statusCode, statusMsg);
 			return false;
 		}
 		
-		bufferPtr->array.size += n;
+		buffer.array.size += n;
 
 		return true;
 	}
@@ -167,14 +163,12 @@ struct HTTPWriter
 
 	bool Write(const char* data, uint64 n)
 	{
-		printf("Write, %lu bytes\n", n);
-
 		if (n == 0) {
 			return true;
 		}
 
-		if (bufferPtr->array.size + n > BUFFER_MAX_SIZE) {
-			uint64 n1 = BUFFER_MAX_SIZE - bufferPtr->array.size;
+		if (buffer.array.size + n > BUFFER_MAX_SIZE) {
+			uint64 n1 = BUFFER_MAX_SIZE - buffer.array.size;
 			if (!Write(data, n1)) {
 				fprintf(stderr, "Large write #1 failed\n");
 				return false;
@@ -189,8 +183,8 @@ struct HTTPWriter
 			}
 		}
 		else {
-			MemCopy(bufferPtr->array.data + bufferPtr->array.size, data, n);
-			bufferPtr->array.size += n;
+			MemCopy(buffer.array.data + buffer.array.size, data, n);
+			buffer.array.size += n;
 		}
 
 		return true;
@@ -210,12 +204,12 @@ struct HTTPWriter
 
 struct ServerMemory
 {
-	static const uint64 BUFFER_LENGTH = MEGABYTES(32);
-	FixedArray<char, BUFFER_LENGTH> buffer;
+	static const uint64 REQUEST_BUFFER_LENGTH = MEGABYTES(4);
+	FixedArray<char, REQUEST_BUFFER_LENGTH> requestBuffer;
 
 	void Init()
 	{
-		buffer.Init();
+		requestBuffer.Init();
 	}
 };
 
@@ -231,13 +225,115 @@ enum HTTPVersion
 	HTTP_VERSION_1_1
 };
 
-void PrintSeparator()
+bool HandlePostRequest(const char* uri, int uriLength,
+	HTTPState* httpState, HTTPWriter* httpWriter, XMLParseState* xmlParseState)
 {
-	printf("========================================"
-		"========================================\n");
+	const char* DATA_DIR_PATH = "./data";
+	const int DATA_DIR_PATH_LENGTH = StringLength(DATA_DIR_PATH);
+
+	char fullDirPath[URI_PATH_MAX_LENGTH];
+	int fullDirPathLength = DATA_DIR_PATH_LENGTH + uriLength;
+	if (DATA_DIR_PATH_LENGTH + uriLength >= URI_PATH_MAX_LENGTH) {
+		fprintf(stderr, "Full dir path too long, URI %.*s\n", uriLength, uri);
+		httpWriter->WriteStatusAndFlush(400, "Bad Request");
+		return true;
+	}
+	MemCopy(fullDirPath, DATA_DIR_PATH, DATA_DIR_PATH_LENGTH);
+	MemCopy(fullDirPath + DATA_DIR_PATH_LENGTH, uri, uriLength);
+	if (fullDirPath[fullDirPathLength - 1] != '/') {
+		fullDirPath[fullDirPathLength++] = '/'; // TODO not bounds-checking
+	}
+	fullDirPath[fullDirPathLength] = '\0';
+
+	DIR* dir = opendir(fullDirPath);
+	if (dir == NULL) {
+		fprintf(stderr, "Failed to open data dir\n");
+		httpWriter->WriteStatusAndFlush(400, "Bad Request");
+		return true;
+	}
+
+	int numFiles = 0;
+	dirent* dirEntry;
+	while ((dirEntry = readdir(dir)) != NULL) {
+		const char* name = dirEntry->d_name;
+		int nameLength = StringLength(name);
+		if (nameLength > 4 && StringCompare(name + nameLength - 4, ".xml", 4)) {
+			char* filePath = httpState->dirFilePaths[numFiles];
+			if (fullDirPathLength + nameLength >= URI_PATH_MAX_LENGTH) {
+				fprintf(stderr, "Path too long for XML file %s in dir %s\n", name, fullDirPath);
+				continue;
+			}
+			MemCopy(filePath, fullDirPath, fullDirPathLength);
+			MemCopy(filePath + fullDirPathLength, name, nameLength);
+			filePath[fullDirPathLength + nameLength] = '\0';
+
+			numFiles++;
+		}
+	}
+
+	closedir(dir);
+
+	// URI_PATH_MAX_LENGTH
+	int dirFilePathsOrder[DATA_MAX_FILES_PER_DIR];
+	for (int i = 0; i < numFiles; i++) {
+		dirFilePathsOrder[i] = i;
+	}
+
+	if (!httpWriter->WriteStatus(200, "OK")) {
+		// TODO something?
+	}
+	if (!httpWriter->Write("[", 1)) {
+		// TODO something?
+	}
+
+	for (int i = 0; i < numFiles; i++) {
+		const char* filePath = httpState->dirFilePaths[dirFilePathsOrder[i]];
+		int fileFD = open(filePath, O_RDONLY);
+		if (fileFD < 0) {
+			fprintf(stderr, "Error opening XML file %s\n", filePath);
+			continue;
+		}
+		int n = read(fileFD, httpState->buffer, HTTPState::BUFFER_LENGTH);
+		if (n < 0) {
+			fprintf(stderr, "Failed to read from XML file %s\n", filePath);
+			close(fileFD);
+			continue;
+		}
+		close(fileFD);
+
+		XML_Parser parser = XML_ParserCreate(NULL);
+		XML_SetElementHandler(parser, StartXML, EndXML);
+		XML_SetCharacterDataHandler(parser, DataXML);
+		XML_SetUserData(parser, xmlParseState);
+		xmlParseState->bufferLength = 0;
+		xmlParseState->firstEntry = true;
+
+		XML_Parse(parser, httpState->buffer, n, true);
+
+		XML_ParserFree(parser);
+
+		if (i != 0) {
+			if (!httpWriter->Write(",", 1)) {
+				// TODO something?
+			}
+		}
+		
+		if (!httpWriter->Write(xmlParseState->buffer, xmlParseState->bufferLength)) {
+			fprintf(stderr, "Failed to write parsed file contents for %s\n", filePath);
+			continue;
+		}
+	}
+
+	if (!httpWriter->Write("]", 1)) {
+		// TODO something?
+	}
+
+	httpWriter->Flush();
+
+	return true;
 }
 
-bool ValidateGetURI(const Array<char>& uri)
+bool ValidateStaticFileURI(const Array<char>& uri)
 {
 	int consecutiveDots = 0;
 	for (uint64 i = 0; i < uri.size; i++) {
@@ -259,7 +355,7 @@ template <uint64 BUFFER_MAX_SIZE>
 bool HandleGetRequest(const Array<char>& uri, HTTPWriter<BUFFER_MAX_SIZE>* httpWriter)
 {
 	// Serve static file
-	if (!ValidateGetURI(uri)) {
+	if (!ValidateStaticFileURI(uri)) {
 		fprintf(stderr, "URI failed validation: %.*s\n", (int)uri.size, uri.data);
 		httpWriter->WriteStatusAndEndHeader(400, "Bad Request");
 		return true;
@@ -321,7 +417,7 @@ bool HandleGetRequest(const Array<char>& uri, HTTPWriter<BUFFER_MAX_SIZE>* httpW
 	}
 	filePath.Append('\0');
 
-	printf("Loading and sending file %s\n", filePath.array.data);
+	// printf("Loading and sending file %s\n", filePath.array.data);
 	int fileFD = open(filePath.array.data, O_RDONLY);
 	if (fileFD < 0) {
 		printf("Failed to open file %s\n", filePath.array.data);
@@ -694,8 +790,7 @@ void RunServer(ServerMemory* serverMemory, int port, bool isHttps)
 		}
 		defer(close(clientSocketFD));
 
-		PrintSeparator();
-		printf("Received client connection\n");
+		// printf("Received client connection\n");
 
 		SSL* ssl;
 		if (isHttps) {
@@ -754,8 +849,8 @@ void RunServer(ServerMemory* serverMemory, int port, bool isHttps)
 		if (!ParseHTTPRequest(serverMemory->buffer.array, &method, &version, &uri)) {
 			// TODO bleh
 		}
-		printf("HTTP version %d request, method %d, URI: %.*s\n",
-			version, method, (int)uri.array.size, uri.array.data);
+		// printf("HTTP version %d request, method %d, URI: %.*s\n",
+		// 	version, method, (int)uri.array.size, uri.array.data);
 
 		HTTPWriter<ServerMemory::BUFFER_LENGTH> httpWriter;
 		serverMemory->buffer.array.size = 0;
@@ -781,11 +876,6 @@ void RunServer(ServerMemory* serverMemory, int port, bool isHttps)
 			fprintf(stderr, "Failed to handle HTTP request\n");
 			continue;
 		}
-
-		/*if (httpWriter.bufferSize != 0) {
-			fprintf(stderr, "Unflushed data in HTTP writer after handler\n");
-			httpWriter.Flush();
-		}*/
 
 		if (isHttps) {
 			SSL_shutdown(ssl);
